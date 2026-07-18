@@ -1,32 +1,38 @@
 (function (root, factory) {
   'use strict';
 
-  const api = factory();
+  const scoring = typeof module === 'object' && module.exports
+    ? require('./scoring.js')
+    : root.ReviewTrustScoring;
+  const api = factory(scoring);
+
   if (typeof module === 'object' && module.exports) {
     module.exports = api;
     return;
   }
 
-  root.ReviewTrustScoring = api;
+  root.ReviewTrustExtension = api;
   api.start();
-})(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+})(typeof globalThis !== 'undefined' ? globalThis : this, function (scoring) {
   'use strict';
 
   const CARD_ID = 'review-trust-meter-card';
   const SAKURA_CHECKER_URL = 'https://sakura-checker.jp/search/';
   const PRODUCT_PATH = /\/(?:[^/]+\/dp|dp|gp\/product)\/([A-Z0-9]{10})(?:[/?]|$)/i;
   let renderTimer;
+  let lastFingerprint = '';
 
   function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
   }
 
   function normalizeSpaces(value) {
-    return String(value || '').replace(/\s+/g, ' ').trim();
+    return String(value || '').normalize('NFKC').replace(/\s+/g, ' ').trim();
   }
 
   function parseInteger(value) {
-    const digits = String(value || '').replace(/[^0-9]/g, '');
+    const normalized = String(value || '').normalize('NFKC');
+    const digits = normalized.replace(/[^0-9]/g, '');
     return digits ? Number.parseInt(digits, 10) : null;
   }
 
@@ -35,6 +41,7 @@
     const patterns = [
       /5つ星のうち\s*([0-5](?:\.[0-9])?)/,
       /5つのうち\s*([0-5](?:\.[0-9])?)/,
+      /星5つ中\s*([0-5](?:\.[0-9])?)つ/,
       /([0-5](?:\.[0-9])?)\s*out of 5/i,
       /^\s*([0-5](?:\.[0-9])?)\s*(?:\/\s*5)?\s*$/
     ];
@@ -48,345 +55,30 @@
 
   function parseHistogramLabel(value) {
     const text = normalizeSpaces(value);
-    const japanese = text.match(/レビューの\s*(\d{1,3})%\s*に星\s*([1-5])つ/);
-    if (japanese) {
-      return { star: Number(japanese[2]), percentage: clamp(Number(japanese[1]), 0, 100) };
+    const japanesePatterns = [
+      /レビューの\s*(\d{1,3})%\s*に星\s*([1-5])つ/,
+      /星\s*([1-5])つ[^0-9]*(\d{1,3})%/,
+      /([1-5])つ星[^0-9]*(\d{1,3})%/
+    ];
+
+    for (let index = 0; index < japanesePatterns.length; index += 1) {
+      const match = text.match(japanesePatterns[index]);
+      if (!match) continue;
+      if (index === 0) return { star: Number(match[2]), percentage: clamp(Number(match[1]), 0, 100) };
+      return { star: Number(match[1]), percentage: clamp(Number(match[2]), 0, 100) };
     }
 
-    const english = text.match(/(\d{1,3})%.*?([1-5])\s*star/i);
+    const english = text.match(/(?:([1-5])\s*star[^0-9]*(\d{1,3})%|(\d{1,3})%.*?([1-5])\s*star)/i);
     if (english) {
-      return { star: Number(english[2]), percentage: clamp(Number(english[1]), 0, 100) };
+      const star = Number(english[1] || english[4]);
+      const percentage = Number(english[2] || english[3]);
+      return { star, percentage: clamp(percentage, 0, 100) };
     }
     return null;
   }
 
   function parseReviewStarText(value) {
-    const text = normalizeSpaces(value).replace(',', '.');
-    const japanese = text.match(/星5つ中\s*([1-5](?:\.[0-9])?)つ/);
-    if (japanese) return Number.parseFloat(japanese[1]);
-    return parseAverageRatingText(text);
-  }
-
-  function isCompleteDistribution(distribution) {
-    return [1, 2, 3, 4, 5].every((star) => Number.isFinite(distribution?.[star]));
-  }
-
-  function getWeightedRating(distribution) {
-    if (!isCompleteDistribution(distribution)) return null;
-    return [1, 2, 3, 4, 5].reduce((sum, star) => sum + star * distribution[star], 0) / 100;
-  }
-
-  function findRepeatedTitleWord(title) {
-    const ignored = new Set(['amazon', '対応', '可能', 'セット', 'タイプ', '付き', '種類', 'ワイヤレス']);
-    const words = normalizeSpaces(title)
-      .toLowerCase()
-      .match(/[a-z0-9][a-z0-9.+-]{2,}|[ぁ-んァ-ヶ一-龠々ー]{3,}/g) || [];
-    const counts = new Map();
-
-    for (const word of words) {
-      if (ignored.has(word)) continue;
-      counts.set(word, (counts.get(word) || 0) + 1);
-    }
-
-    let repeated = null;
-    for (const [word, count] of counts) {
-      if (count >= 2 && (!repeated || count > repeated.count)) repeated = { word, count };
-    }
-    return repeated;
-  }
-
-  function collectMatches(text, pattern, valueIndex = 1) {
-    const values = new Set();
-    for (const match of String(text || '').matchAll(pattern)) values.add(String(match[valueIndex]).toUpperCase());
-    return [...values];
-  }
-
-  function collectClaimConflicts(title, details) {
-    const definitions = [
-      { label: '連続時間', pattern: /(\d+(?:\.\d+)?)\s*時間/gi },
-      { label: '発光などの種類数', pattern: /(\d+)\s*種類/gi },
-      { label: '防水・防塵等級', pattern: /\b(IP(?:X\d|\d{2}))\b/gi }
-    ];
-    const conflicts = [];
-
-    for (const definition of definitions) {
-      const inTitle = collectMatches(title, definition.pattern);
-      const inDetails = collectMatches(details, definition.pattern);
-      if (!inTitle.length || !inDetails.length) continue;
-      if (inTitle.some((value) => inDetails.includes(value))) continue;
-      conflicts.push({ label: definition.label, title: inTitle, details: inDetails });
-    }
-    return conflicts;
-  }
-
-  function findDateCluster(reviews, windowDays = 120) {
-    const timestamps = reviews
-      .map((review) => Date.parse(review.date))
-      .filter(Number.isFinite)
-      .sort((left, right) => left - right);
-    if (timestamps.length < 6) return null;
-
-    let maxCount = 1;
-    let right = 0;
-    const windowMs = windowDays * 24 * 60 * 60 * 1000;
-    for (let left = 0; left < timestamps.length; left += 1) {
-      if (right < left) right = left;
-      while (right + 1 < timestamps.length && timestamps[right + 1] - timestamps[left] <= windowMs) right += 1;
-      maxCount = Math.max(maxCount, right - left + 1);
-    }
-
-    return { count: maxCount, total: timestamps.length, ratio: maxCount / timestamps.length, windowDays };
-  }
-
-  function normalizeReviewBody(value) {
-    return String(value || '')
-      .toLowerCase()
-      .replace(/[\s\p{P}\p{S}]+/gu, '');
-  }
-
-  function isGenericReviewBody(value) {
-    const body = normalizeReviewBody(value);
-    if (!body) return true;
-    if (body.length <= 28) return true;
-    return /^(とても)?(良い|いい|満足|おすすめ|使えます|問題ない|最高)(商品|です|でした|と思います)*$/.test(body);
-  }
-
-  function getShingles(value, size = 3) {
-    const normalized = normalizeReviewBody(value);
-    const shingles = new Set();
-    for (let index = 0; index <= normalized.length - size; index += 1) {
-      shingles.add(normalized.slice(index, index + size));
-    }
-    return shingles;
-  }
-
-  function getMaximumReviewSimilarity(reviews) {
-    const bodies = reviews
-      .map((review) => review.body)
-      .filter((body) => normalizeReviewBody(body).length >= 45)
-      .slice(0, 12);
-    let maximum = 0;
-
-    for (let left = 0; left < bodies.length; left += 1) {
-      const leftSet = getShingles(bodies[left]);
-      for (let right = left + 1; right < bodies.length; right += 1) {
-        const rightSet = getShingles(bodies[right]);
-        const intersection = [...leftSet].filter((item) => rightSet.has(item)).length;
-        const union = new Set([...leftSet, ...rightSet]).size;
-        if (union) maximum = Math.max(maximum, intersection / union);
-      }
-    }
-    return maximum;
-  }
-
-  function addSignal(signals, id, group, points, text, evidence) {
-    signals.push({ id, group, points, text, evidence: evidence || '' });
-  }
-
-  function analyzeProduct(input) {
-    const averageRating = Number.isFinite(input.averageRating) ? input.averageRating : null;
-    const reviewCount = Number.isFinite(input.reviewCount) ? input.reviewCount : null;
-    const distribution = input.distribution || {};
-    const title = normalizeSpaces(input.title);
-    const brand = normalizeSpaces(input.brand);
-    const details = normalizeSpaces(input.details);
-    const reviews = Array.isArray(input.reviews) ? input.reviews : [];
-    const signals = [];
-
-    if (title.length > 110) {
-      addSignal(signals, 'long_title', '商品情報', title.length > 170 ? 10 : 8, '商品名が長く、検索語を詰め込んだ可能性', `${title.length}文字`);
-    }
-
-    if (title && brand) {
-      const normalizedTitle = title.toLowerCase().replace(/[^a-z0-9ぁ-んァ-ヶ一-龠々ー]/g, '');
-      const normalizedBrand = brand.toLowerCase().replace(/[^a-z0-9ぁ-んァ-ヶ一-龠々ー]/g, '');
-      if (normalizedBrand && !normalizedTitle.includes(normalizedBrand)) {
-        addSignal(signals, 'brand_missing', '商品情報', 14, 'ブランド名が商品名に見当たらない', brand);
-      }
-    }
-
-    const repeated = findRepeatedTitleWord(title);
-    if (repeated) {
-      addSignal(signals, 'repeated_keyword', '商品情報', 6, '同じキーワードが商品名で繰り返されている', `「${repeated.word}」${repeated.count}回`);
-    }
-
-    const promotionalTerms = ['最高', '最強', '超', '驚き', '大音量', '重低音', '高音質', '先端', '究極', '圧倒的']
-      .filter((term) => title.includes(term));
-    if (promotionalTerms.length >= 4) {
-      addSignal(signals, 'promotional_title', '商品情報', 7, '強い宣伝表現が商品名に集中', promotionalTerms.join('・'));
-    }
-
-    const claimConflicts = collectClaimConflicts(title, details);
-    if (claimConflicts.length) {
-      const evidence = claimConflicts
-        .map((conflict) => `${conflict.label}: 商品名 ${conflict.title.join('/')} ↔ 説明 ${conflict.details.join('/')}`)
-        .join('、');
-      addSignal(signals, 'claim_conflicts', '商品情報', Math.min(18, claimConflicts.length * 7), '商品名と説明で仕様の数値が食い違う', evidence);
-    }
-
-    if (isCompleteDistribution(distribution)) {
-      const five = distribution[5];
-      const one = distribution[1];
-      const positive = distribution[4] + five;
-      if (five >= 85) {
-        addSignal(signals, 'five_star_skew', '評価分布', 12, '★5へ強く偏っている', `★5 ${five}%`);
-      }
-      if (five >= 70 && one >= 12) {
-        addSignal(signals, 'polarized_distribution', '評価分布', 14, '★5と★1へ二極化している', `★5 ${five}% / ★1 ${one}%`);
-      }
-      if (positive >= 95 && one <= 1) {
-        addSignal(signals, 'near_perfect_distribution', '評価分布', 10, '高評価が極端に集中している', `★4〜5 ${positive}% / ★1 ${one}%`);
-      }
-
-      const weightedRating = getWeightedRating(distribution);
-      if (Number.isFinite(averageRating) && Math.abs(weightedRating - averageRating) >= 0.35) {
-        addSignal(signals, 'rating_mismatch', '評価分布', 10, '平均評価と星別分布の整合性が低い', `表示 ${averageRating.toFixed(1)} / 分布換算 ${weightedRating.toFixed(1)}`);
-      }
-    }
-
-    const dateCluster = findDateCluster(reviews);
-    if (dateCluster && dateCluster.ratio >= 0.5) {
-      addSignal(
-        signals,
-        'review_date_cluster',
-        '表示レビュー',
-        dateCluster.ratio >= 0.7 ? 18 : 14,
-        'レビュー投稿日が短期間に集中',
-        `${dateCluster.windowDays}日以内に${dateCluster.count}/${dateCluster.total}件`
-      );
-    }
-
-    const highRatedReviews = reviews.filter((review) => Number.isFinite(review.stars) && review.stars >= 4);
-    const genericHighRated = highRatedReviews.filter((review) => isGenericReviewBody(review.body));
-    if (highRatedReviews.length >= 4 && genericHighRated.length / highRatedReviews.length >= 0.35) {
-      const percentage = Math.round((genericHighRated.length / highRatedReviews.length) * 100);
-      addSignal(signals, 'generic_high_rating', '表示レビュー', 12, '高評価に短文・汎用的な本文が多い', `${genericHighRated.length}/${highRatedReviews.length}件（${percentage}%）`);
-    }
-
-    const verifiedKnown = reviews.filter((review) => typeof review.verified === 'boolean');
-    if (verifiedKnown.length >= 6) {
-      const verifiedCount = verifiedKnown.filter((review) => review.verified).length;
-      const verifiedRatio = verifiedCount / verifiedKnown.length;
-      if (verifiedRatio < 0.5) {
-        addSignal(signals, 'low_verified_ratio', '表示レビュー', 10, '確認済み購入の割合が低い', `${verifiedCount}/${verifiedKnown.length}件`);
-      }
-    }
-
-    const maximumSimilarity = getMaximumReviewSimilarity(reviews);
-    if (maximumSimilarity >= 0.62) {
-      addSignal(signals, 'similar_review_text', '表示レビュー', 14, 'よく似たレビュー本文がある', `類似度 ${Math.round(maximumSimilarity * 100)}%`);
-    }
-
-    const coverage = {
-      rating: Number.isFinite(averageRating) && Number.isFinite(reviewCount),
-      distribution: isCompleteDistribution(distribution),
-      listing: Boolean(title && brand && details),
-      reviews: reviews.length >= 6
-    };
-    const coverageCount = Object.values(coverage).filter(Boolean).length;
-    const sufficient = coverageCount >= 3 && coverage.rating;
-    const score = clamp(signals.reduce((sum, signal) => sum + signal.points, 0), 0, 100);
-    const trustStars = sufficient ? Number(clamp(5 - score * 0.04, 1, 5).toFixed(1)) : null;
-
-    let label = '判定材料不足';
-    let tone = 'unknown';
-    if (sufficient && score >= 65) {
-      label = '要注意';
-      tone = 'high';
-    } else if (sufficient && score >= 40) {
-      label = '注意';
-      tone = 'medium';
-    } else if (sufficient) {
-      label = '強い兆候は少ない';
-      tone = 'low';
-    }
-
-    return {
-      score,
-      trustStars,
-      sufficient,
-      label,
-      tone,
-      signals: signals.sort((left, right) => right.points - left.points),
-      coverage,
-      coverageCount,
-      coverageTotal: Object.keys(coverage).length,
-      weightedRating: getWeightedRating(distribution),
-      sampleSize: reviews.length
-    };
-  }
-
-  function getAsin() {
-    const match = location.pathname.match(PRODUCT_PATH);
-    return match ? match[1].toUpperCase() : null;
-  }
-
-  function getAverageRating() {
-    const candidates = [
-      document.querySelector('#acrPopover')?.getAttribute('title'),
-      document.querySelector('#averageCustomerReviews #acrPopover')?.textContent,
-      document.querySelector('#averageCustomerReviews .a-icon-alt')?.textContent,
-      document.querySelector('[data-hook="rating-out-of-text"]')?.textContent
-    ];
-    for (const candidate of candidates) {
-      const rating = parseAverageRatingText(candidate);
-      if (Number.isFinite(rating)) return rating;
-    }
-    return null;
-  }
-
-  function getReviewCount() {
-    const element = document.querySelector('#acrCustomerReviewText, [data-hook="total-review-count"]');
-    return parseInteger(element?.getAttribute('aria-label') || element?.textContent);
-  }
-
-  function getHistogram() {
-    const distribution = { 1: null, 2: null, 3: null, 4: null, 5: null };
-    const rows = document.querySelectorAll('#histogramTable a[aria-label], [data-hook="review-star-filter"][aria-label], tr.a-histogram-row');
-
-    for (const row of rows) {
-      const parsed = parseHistogramLabel(row.getAttribute('aria-label'));
-      if (parsed) {
-        distribution[parsed.star] = parsed.percentage;
-        continue;
-      }
-
-      const href = row.getAttribute('href') || row.querySelector('a')?.getAttribute('href') || '';
-      const starNames = { five_star: 5, four_star: 4, three_star: 3, two_star: 2, one_star: 1 };
-      const starName = href.match(/filterByStar=([a-z_]+)/i)?.[1];
-      const percentage = Number(row.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow'));
-      if (starNames[starName] && Number.isFinite(percentage)) distribution[starNames[starName]] = clamp(percentage, 0, 100);
-    }
-    return distribution;
-  }
-
-  function getTitle() {
-    return normalizeSpaces(document.querySelector('#productTitle')?.textContent);
-  }
-
-  function getBrand() {
-    const byline = normalizeSpaces(document.querySelector('#bylineInfo')?.textContent);
-    if (byline) {
-      return byline
-        .replace(/のストアを表示.*$/, '')
-        .replace(/^ブランド[:：]\s*/, '')
-        .trim();
-    }
-
-    for (const row of document.querySelectorAll('#productOverview_feature_div tr, #productDetails_techSpec_section_1 tr')) {
-      const label = normalizeSpaces(row.querySelector('th, td:first-child')?.textContent);
-      if (!/ブランド|Brand/i.test(label)) continue;
-      return normalizeSpaces(row.querySelector('td:last-child')?.textContent);
-    }
-    return '';
-  }
-
-  function getListingDetails() {
-    return [
-      document.querySelector('#feature-bullets')?.textContent,
-      document.querySelector('#productDescription')?.textContent,
-      document.querySelector('#aplus')?.textContent
-    ].filter(Boolean).map(normalizeSpaces).join(' ');
+    return parseAverageRatingText(value);
   }
 
   function parseReviewDate(value) {
@@ -395,20 +87,153 @@
     if (japanese) {
       return `${japanese[1]}-${japanese[2].padStart(2, '0')}-${japanese[3].padStart(2, '0')}`;
     }
-    const parsed = Date.parse(text);
+
+    const englishText = text
+      .replace(/^.*?reviewed in .*? on\s+/i, '')
+      .replace(/^.*?on\s+/i, '');
+    const parsed = Date.parse(englishText);
     return Number.isFinite(parsed) ? new Date(parsed).toISOString().slice(0, 10) : '';
   }
 
-  function getReviewSample() {
-    return [...document.querySelectorAll('[data-hook="review"]')].slice(0, 12).map((review) => {
-      const starText = review.querySelector('[data-hook="review-star-rating"], [data-hook="cmps-review-star-rating"]')?.textContent;
-      const verified = Boolean(review.querySelector('[data-hook="avp-badge"]'));
+  function parseHelpfulVotes(value) {
+    const text = normalizeSpaces(value);
+    if (!text) return null;
+    if (/一人|1人|one person/i.test(text)) return 1;
+    return parseInteger(text);
+  }
+
+  function getAsin(locationObject = location) {
+    const match = locationObject.pathname.match(PRODUCT_PATH);
+    return match ? match[1].toUpperCase() : null;
+  }
+
+  function getAverageRating(doc = document) {
+    const candidates = [
+      doc.querySelector('#acrPopover')?.getAttribute('title'),
+      doc.querySelector('#averageCustomerReviews #acrPopover')?.textContent,
+      doc.querySelector('#averageCustomerReviews .a-icon-alt')?.textContent,
+      doc.querySelector('[data-hook="rating-out-of-text"]')?.textContent,
+      doc.querySelector('[data-csa-c-type="widget"] [aria-label*="5つ星のうち"]')?.getAttribute('aria-label')
+    ];
+    for (const candidate of candidates) {
+      const rating = parseAverageRatingText(candidate);
+      if (Number.isFinite(rating)) return rating;
+    }
+    return null;
+  }
+
+  function getReviewCount(doc = document) {
+    const candidates = [
+      doc.querySelector('#acrCustomerReviewText'),
+      doc.querySelector('[data-hook="total-review-count"]'),
+      doc.querySelector('#averageCustomerReviews [href*="#customerReviews"]')
+    ];
+    for (const element of candidates) {
+      const count = parseInteger(element?.getAttribute('aria-label') || element?.textContent);
+      if (Number.isFinite(count)) return count;
+    }
+    return null;
+  }
+
+  function getHistogram(doc = document) {
+    const distribution = { 1: null, 2: null, 3: null, 4: null, 5: null };
+    const rows = doc.querySelectorAll('#histogramTable tr, #histogramTable a[aria-label], [data-hook="review-star-filter"]');
+
+    for (const row of rows) {
+      const labels = [
+        row.getAttribute?.('aria-label'),
+        row.querySelector?.('[aria-label]')?.getAttribute('aria-label'),
+        row.textContent
+      ];
+      let parsed = null;
+      for (const label of labels) {
+        parsed = parseHistogramLabel(label);
+        if (parsed) break;
+      }
+      if (parsed) {
+        distribution[parsed.star] = parsed.percentage;
+        continue;
+      }
+
+      const href = row.getAttribute?.('href') || row.querySelector?.('a')?.getAttribute('href') || '';
+      const starNames = { five_star: 5, four_star: 4, three_star: 3, two_star: 2, one_star: 1 };
+      const starName = href.match(/filterByStar=([a-z_]+)/i)?.[1];
+      const progress = row.querySelector?.('[role="progressbar"]');
+      const percentage = Number(progress?.getAttribute('aria-valuenow'));
+      if (starNames[starName] && Number.isFinite(percentage)) {
+        distribution[starNames[starName]] = clamp(percentage, 0, 100);
+      }
+    }
+    return distribution;
+  }
+
+  function getTitle(doc = document) {
+    return normalizeSpaces(doc.querySelector('#productTitle')?.textContent);
+  }
+
+  function getBrand(doc = document) {
+    const byline = normalizeSpaces(doc.querySelector('#bylineInfo')?.textContent);
+    if (byline) {
+      return byline
+        .replace(/のストアを表示.*$/, '')
+        .replace(/^ブランド[:：]\s*/, '')
+        .replace(/^Visit the\s+/i, '')
+        .replace(/\s+Store$/i, '')
+        .trim();
+    }
+
+    for (const row of doc.querySelectorAll('#productOverview_feature_div tr, #productDetails_techSpec_section_1 tr, #productDetails_detailBullets_sections1 tr')) {
+      const label = normalizeSpaces(row.querySelector('th, td:first-child')?.textContent);
+      if (!/ブランド|Brand/i.test(label)) continue;
+      return normalizeSpaces(row.querySelector('td:last-child')?.textContent);
+    }
+    return '';
+  }
+
+  function getListingDetails(doc = document) {
+    return [
+      doc.querySelector('#feature-bullets')?.textContent,
+      doc.querySelector('#productOverview_feature_div')?.textContent,
+      doc.querySelector('#productDescription')?.textContent,
+      doc.querySelector('#aplus')?.textContent,
+      doc.querySelector('#productDetails_techSpec_section_1')?.textContent
+    ].filter(Boolean).map(normalizeSpaces).join(' ');
+  }
+
+  function getReviewTitle(reviewElement) {
+    const titleElement = reviewElement.querySelector('[data-hook="review-title"]');
+    if (!titleElement) return '';
+    const clone = titleElement.cloneNode(true);
+    clone.querySelectorAll('.a-icon-alt, [data-hook="review-star-rating"], [data-hook="cmps-review-star-rating"]').forEach((element) => element.remove());
+    return normalizeSpaces(clone.textContent);
+  }
+
+  function getReviewerId(reviewElement) {
+    const profileLink = reviewElement.querySelector('[data-hook="review-author"] a, .a-profile');
+    const href = profileLink?.getAttribute('href') || '';
+    return href.match(/\/gp\/profile\/([^/?]+)/i)?.[1] || '';
+  }
+
+  function getReviewSample(doc = document) {
+    return [...doc.querySelectorAll('[data-hook="review"]')].slice(0, 20).map((reviewElement) => {
+      const starText = reviewElement.querySelector('[data-hook="review-star-rating"], [data-hook="cmps-review-star-rating"], .review-rating')?.textContent;
+      const fullText = normalizeSpaces(reviewElement.textContent);
+      const verifiedBadge = reviewElement.querySelector('[data-hook="avp-badge"]');
+      const vineBadge = reviewElement.querySelector('[data-hook="vine-review-badge"], .vine-review-badge');
+      const vine = Boolean(vineBadge) || /Vine(?:先取りプログラム|カスタマーレビュー| Customer Review)/i.test(fullText);
+      const helpfulElement = reviewElement.querySelector('[data-hook="helpful-vote-statement"]');
       return {
+        id: reviewElement.id || reviewElement.getAttribute('data-review-id') || '',
+        reviewerId: getReviewerId(reviewElement),
         stars: parseReviewStarText(starText),
-        body: normalizeSpaces(review.querySelector('[data-hook="review-body"]')?.textContent),
-        date: parseReviewDate(review.querySelector('[data-hook="review-date"]')?.textContent),
-        verified,
-        imageCount: review.querySelectorAll('[data-hook="review-image-tile"], .review-image-tile').length
+        title: getReviewTitle(reviewElement),
+        body: normalizeSpaces(reviewElement.querySelector('[data-hook="review-body"]')?.textContent),
+        date: parseReviewDate(reviewElement.querySelector('[data-hook="review-date"]')?.textContent),
+        verified: vine ? false : Boolean(verifiedBadge),
+        vine,
+        variation: normalizeSpaces(reviewElement.querySelector('[data-hook="format-strip"]')?.textContent),
+        helpfulVotes: parseHelpfulVotes(helpfulElement?.textContent),
+        imageCount: reviewElement.querySelectorAll('[data-hook="review-image-tile"], .review-image-tile').length
       };
     });
   }
@@ -433,25 +258,50 @@
       .replace(/'/g, '&#039;');
   }
 
+  function formatSigned(value, digits = 1) {
+    if (!Number.isFinite(value)) return '';
+    const rounded = value.toFixed(digits);
+    return value > 0 ? `+${rounded}` : rounded;
+  }
+
+  function createSignalHtml(analysis) {
+    if (!analysis.signals.length) {
+      return '<p class="review-trust-meter__none">取得できた範囲では、設定した複合兆候を検出しませんでした。</p>';
+    }
+    return `<ul class="review-trust-meter__reasons">${analysis.signals.slice(0, 8).map((signal) => `
+      <li>
+        <span class="review-trust-meter__points">+${signal.points}</span>
+        <span>
+          <strong>${escapeHtml(signal.text)}</strong>
+          <small>${escapeHtml(signal.group)}${signal.evidence ? ` · ${escapeHtml(signal.evidence)}` : ''}</small>
+        </span>
+      </li>`).join('')}</ul>`;
+  }
+
+  function createObservationHtml(analysis) {
+    if (!analysis.observations?.length) return '';
+    return `
+      <p class="review-trust-meter__section-title">補足</p>
+      <ul class="review-trust-meter__observations">${analysis.observations.slice(0, 5).map((item) => `
+        <li><strong>${escapeHtml(item.text)}</strong>${item.evidence ? `<small>${escapeHtml(item.evidence)}</small>` : ''}</li>`).join('')}</ul>`;
+  }
+
   function createCard({ asin, averageRating, reviewCount, distribution, analysis }) {
     const card = document.createElement('section');
     card.id = CARD_ID;
     card.className = `review-trust-meter review-trust-meter--${analysis.tone}`;
     card.dataset.riskScore = String(analysis.score);
     card.dataset.analysisSufficient = String(analysis.sufficient);
-    card.setAttribute('aria-label', 'レビュー信頼度メーター');
+    card.setAttribute('aria-label', 'Amazonレビュー注意度メーター');
 
     const scoreHtml = analysis.sufficient
-      ? `<span class="review-trust-meter__score"><span aria-hidden="true">★</span> ${analysis.trustStars.toFixed(1)}<span class="review-trust-meter__out-of"> / 5</span></span>`
+      ? `<span class="review-trust-meter__score"><span class="review-trust-meter__score-label">注意度</span><strong>${analysis.score}</strong><span class="review-trust-meter__out-of"> / 100</span></span>`
       : '<span class="review-trust-meter__score review-trust-meter__score--unknown">判定不能</span>';
-    const signalHtml = analysis.signals.length
-      ? `<ul class="review-trust-meter__reasons">${analysis.signals.slice(0, 6).map((signal) => `
-          <li>
-            <span class="review-trust-meter__points">+${signal.points}</span>
-            <span><strong>${escapeHtml(signal.text)}</strong>${signal.evidence ? `<small>${escapeHtml(signal.evidence)}</small>` : ''}</span>
-          </li>`).join('')}</ul>`
-      : '<p class="review-trust-meter__none">取得できた範囲では、設定した注意兆候を検出しませんでした。</p>';
-    const histogramText = isCompleteDistribution(distribution)
+    const adjustedText = Number.isFinite(analysis.adjustedRating)
+      ? `★ ${analysis.adjustedRating.toFixed(1)}${Math.abs(analysis.adjustmentDelta || 0) >= 0.05 ? `<small>${formatSigned(analysis.adjustmentDelta, 1)}</small>` : ''}`
+      : '算出不可';
+    const histogramInfo = scoring.distributionInfo(distribution);
+    const histogramText = histogramInfo.usable
       ? [5, 4, 3, 2, 1].map((star) => `★${star} ${distribution[star]}%`).join(' / ')
       : '星別分布は取得できませんでした';
 
@@ -460,7 +310,7 @@
         <summary class="review-trust-meter__summary">
           ${scoreHtml}
           <span class="review-trust-meter__label">${escapeHtml(analysis.label)}</span>
-          <span class="review-trust-meter__risk">注意度 <strong>${analysis.score} / 100</strong></span>
+          <span class="review-trust-meter__confidence">判定確度 <strong>${analysis.confidence}%</strong></span>
           <span class="review-trust-meter__toggle">
             <span class="review-trust-meter__toggle-open">詳細を見る</span>
             <span class="review-trust-meter__toggle-close">閉じる</span>
@@ -468,23 +318,27 @@
         </summary>
         <div class="review-trust-meter__details">
           <div class="review-trust-meter__details-heading">
-            <p class="review-trust-meter__eyebrow">レビュー信頼度（独自分析）</p>
-            <p class="review-trust-meter__coverage">星が低いほど注意・取得項目 ${analysis.coverageCount}/${analysis.coverageTotal}</p>
+            <p class="review-trust-meter__eyebrow">レビュー信頼度・複合分析 v2</p>
+            <p class="review-trust-meter__coverage">取得項目 ${analysis.coverageCount}/${analysis.coverageTotal} · 表示レビューのみ</p>
           </div>
           <div class="review-trust-meter__bar" aria-label="独自注意度 ${analysis.score}%"><span style="width:${analysis.score}%"></span></div>
           <dl class="review-trust-meter__facts">
             <div><dt>Amazon平均</dt><dd>${Number.isFinite(averageRating) ? `★ ${averageRating.toFixed(1)}` : '取得不可'}</dd></div>
-            <div><dt>レビュー数</dt><dd>${Number.isFinite(reviewCount) ? `${reviewCount.toLocaleString('ja-JP')}件` : '取得不可'}</dd></div>
+            <div><dt>補正評価（参考）</dt><dd>${adjustedText}</dd></div>
+            <div><dt>判定確度</dt><dd>${analysis.confidence}%（${escapeHtml(analysis.confidenceLabel)}）</dd></div>
+            <div><dt>評価・レビュー数</dt><dd>${Number.isFinite(reviewCount) ? `${reviewCount.toLocaleString('ja-JP')}件` : '取得不可'}</dd></div>
             <div><dt>本文分析</dt><dd>${analysis.sampleSize}件</dd></div>
           </dl>
           <p class="review-trust-meter__histogram">${escapeHtml(histogramText)}</p>
-          <p class="review-trust-meter__section-title">判定根拠</p>
-          ${signalHtml}
+          <p class="review-trust-meter__section-title">主な判定根拠</p>
+          ${createSignalHtml(analysis)}
+          ${createObservationHtml(analysis)}
           <div class="review-trust-meter__method">
-            <p class="review-trust-meter__method-title">この点数の見方</p>
-            <p>商品名・記載値の整合性、星分布、表示中レビューの日付・本文・確認済み購入をローカル分析しています。ブランド履歴、ショップ履歴、削除済みレビュー、カテゴリ平均との差は含みません。</p>
+            <p class="review-trust-meter__method-title">判定方法</p>
+            <p>星分布、本文の重複群、短文率、投稿日バースト、評価方向、購入確認、Vine、商品記載の整合性を別々に評価し、独立した兆候が重なった場合だけ強く加点します。投稿日集中や無名ブランドだけでは要注意判定にしません。</p>
+            <p>補正評価は、表示中レビューの疑わしさで星別分布を小さく再重み付けした参考値です。全レビューを取得していないため、Amazon平均より優先する値ではありません。</p>
           </div>
-          <p class="review-trust-meter__note">本家サクラチェッカーの点数ではなく、購入前に詳しく確認する必要度の目安です。</p>
+          <p class="review-trust-meter__note">注意度は「不正レビューである確率」ではありません。Amazon内部の購入・返金・アカウント情報、削除済みレビュー、全投稿履歴は取得していません。</p>
           <a class="review-trust-meter__link" href="${SAKURA_CHECKER_URL}${escapeHtml(asin)}/" target="_blank" rel="noopener noreferrer">本家サクラチェッカーで確認 ↗</a>
         </div>
       </details>
@@ -492,11 +346,38 @@
     return card;
   }
 
+  function collectPageData(doc = document) {
+    return {
+      averageRating: getAverageRating(doc),
+      reviewCount: getReviewCount(doc),
+      distribution: getHistogram(doc),
+      title: getTitle(doc),
+      brand: getBrand(doc),
+      details: getListingDetails(doc),
+      reviews: getReviewSample(doc)
+    };
+  }
+
+  function createFingerprint(asin, data) {
+    return JSON.stringify({
+      asin,
+      averageRating: data.averageRating,
+      reviewCount: data.reviewCount,
+      distribution: data.distribution,
+      title: data.title,
+      brand: data.brand,
+      detailsLength: data.details.length,
+      reviews: data.reviews.map((review) => [review.id, review.stars, review.date, review.verified, review.vine, review.variation, review.body])
+    });
+  }
+
   function render() {
+    if (!scoring) return;
     const asin = getAsin();
     const currentCard = document.getElementById(CARD_ID);
     if (!asin) {
       currentCard?.remove();
+      lastFingerprint = '';
       return;
     }
 
@@ -505,50 +386,56 @@
       currentCard?.remove();
       return;
     }
-    const averageRating = getAverageRating();
-    const reviewCount = getReviewCount();
-    const distribution = getHistogram();
-    const analysis = analyzeProduct({
-      averageRating,
-      reviewCount,
-      distribution,
-      title: getTitle(),
-      brand: getBrand(),
-      details: getListingDetails(),
-      reviews: getReviewSample()
+
+    const pageData = collectPageData();
+    const fingerprint = createFingerprint(asin, pageData);
+    if (fingerprint === lastFingerprint && currentCard) return;
+
+    const analysis = scoring.analyzeProduct(pageData);
+    const nextCard = createCard({
+      asin,
+      averageRating: pageData.averageRating,
+      reviewCount: pageData.reviewCount,
+      distribution: pageData.distribution,
+      analysis
     });
-    const nextCard = createCard({ asin, averageRating, reviewCount, distribution, analysis });
+    const wasOpen = Boolean(currentCard?.querySelector('details')?.open);
+    if (wasOpen) nextCard.querySelector('details').open = true;
     currentCard?.remove();
     insertionPoint.element.insertAdjacentElement(insertionPoint.position, nextCard);
+    lastFingerprint = fingerprint;
   }
 
   function scheduleRender() {
     window.clearTimeout(renderTimer);
-    renderTimer = window.setTimeout(render, 500);
+    renderTimer = window.setTimeout(render, 650);
   }
 
   function start() {
+    if (typeof document === 'undefined' || typeof window === 'undefined') return;
     scheduleRender();
     new MutationObserver((mutations) => {
-      const changedByPage = mutations.some((mutation) =>
-        [...mutation.addedNodes].some((node) =>
-          node.nodeType === Node.ELEMENT_NODE &&
-          node.id !== CARD_ID &&
-          !node.querySelector?.(`#${CARD_ID}`)
-        )
-      );
+      const changedByPage = mutations.some((mutation) => {
+        if (mutation.target?.closest?.(`#${CARD_ID}`)) return false;
+        return [...mutation.addedNodes, ...mutation.removedNodes].some((node) => {
+          if (node.nodeType !== Node.ELEMENT_NODE) return false;
+          if (node.id === CARD_ID || node.closest?.(`#${CARD_ID}`) || node.querySelector?.(`#${CARD_ID}`)) return false;
+          return true;
+        });
+      });
       if (changedByPage) scheduleRender();
     }).observe(document.documentElement, { childList: true, subtree: true });
   }
 
   return {
-    analyzeProduct,
-    collectClaimConflicts,
+    collectPageData,
+    createFingerprint,
     findInsertionPoint,
-    findDateCluster,
-    isGenericReviewBody,
+    getAsin,
     parseAverageRatingText,
     parseHistogramLabel,
+    parseHelpfulVotes,
+    parseReviewDate,
     parseReviewStarText,
     start
   };

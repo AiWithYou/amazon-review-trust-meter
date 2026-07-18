@@ -12,21 +12,25 @@
   border-left: 5px solid #067d62;
   border-radius: 8px;
   box-shadow: 0 1px 2px rgba(15, 17, 17, .08);
-  font-family: Arial, sans-serif;
-  line-height: 1.4;
+  font-family: Arial, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+  line-height: 1.45;
 }
 
+#review-trust-meter-card.review-trust-meter--guarded { border-left-color: #9a6700; }
 #review-trust-meter-card.review-trust-meter--medium { border-left-color: #c45500; }
 #review-trust-meter-card.review-trust-meter--high { border-left-color: #b12704; }
 #review-trust-meter-card.review-trust-meter--unknown { border-left-color: #6b7280; }
 
-.review-trust-meter *, .review-trust-meter *::before, .review-trust-meter *::after { box-sizing: border-box; }
+.review-trust-meter *,
+.review-trust-meter *::before,
+.review-trust-meter *::after { box-sizing: border-box; }
+
 .review-trust-meter__panel { margin: 0; }
 .review-trust-meter__summary {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 50px;
+  min-height: 52px;
   padding: 10px 12px;
   list-style: none;
   cursor: pointer;
@@ -34,50 +38,165 @@
 }
 .review-trust-meter__summary::-webkit-details-marker { display: none; }
 .review-trust-meter__summary::marker { content: ''; }
-.review-trust-meter__summary:hover { background: #f7fafa; }
-.review-trust-meter__summary:focus-visible { outline: 3px solid #007185; outline-offset: -3px; }
+.review-trust-meter__summary:hover,
 .review-trust-meter__panel[open] > .review-trust-meter__summary { background: #f7fafa; }
-.review-trust-meter__eyebrow { margin: 0; color: #0f1111; font-size: 13px; font-weight: 700; }
-.review-trust-meter__score { flex: 0 0 auto; color: #0f1111; font-size: 20px; font-weight: 700; letter-spacing: -.2px; white-space: nowrap; }
-.review-trust-meter__score span:first-child { color: #ff9900; }
-.review-trust-meter__score--unknown { color: #565959; font-size: 16px; }
-.review-trust-meter__out-of { color: #565959; font-size: 12px; font-weight: 400; }
-.review-trust-meter__label { display: inline-block; padding: 4px 8px; color: #fff; background: #067d62; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.review-trust-meter__summary:focus-visible { outline: 3px solid #007185; outline-offset: -3px; }
+
+.review-trust-meter__score {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: baseline;
+  gap: 4px;
+  color: #0f1111;
+  white-space: nowrap;
+}
+.review-trust-meter__score-label { color: #565959; font-size: 11px; font-weight: 600; }
+.review-trust-meter__score strong { font-size: 23px; line-height: 1; letter-spacing: -.4px; }
+.review-trust-meter__score--unknown { color: #565959; font-size: 16px; font-weight: 700; }
+.review-trust-meter__out-of { color: #565959; font-size: 11px; font-weight: 400; }
+
+.review-trust-meter__label {
+  display: inline-block;
+  padding: 4px 8px;
+  color: #fff;
+  background: #067d62;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.review-trust-meter--guarded .review-trust-meter__label { background: #9a6700; }
 .review-trust-meter--medium .review-trust-meter__label { background: #c45500; }
 .review-trust-meter--high .review-trust-meter__label { background: #b12704; }
 .review-trust-meter--unknown .review-trust-meter__label { background: #6b7280; }
-.review-trust-meter__risk { flex: 0 0 auto; margin-left: auto; color: #37475a; font-size: 12px; white-space: nowrap; }
-.review-trust-meter__risk strong { color: #0f1111; }
-.review-trust-meter__toggle { flex: 0 0 auto; padding-left: 10px; color: #007185; border-left: 1px solid #d5d9d9; font-size: 12px; font-weight: 700; white-space: nowrap; }
+
+.review-trust-meter__confidence {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: #37475a;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.review-trust-meter__confidence strong { color: #0f1111; }
+.review-trust-meter__toggle {
+  flex: 0 0 auto;
+  padding-left: 10px;
+  color: #007185;
+  border-left: 1px solid #d5d9d9;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
 .review-trust-meter__toggle-close { display: none; }
 .review-trust-meter__panel[open] .review-trust-meter__toggle-open { display: none; }
 .review-trust-meter__panel[open] .review-trust-meter__toggle-close { display: inline; }
+
 .review-trust-meter__details { padding: 12px; border-top: 1px solid #eaeded; }
-.review-trust-meter__details-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.review-trust-meter__details-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.review-trust-meter__eyebrow { margin: 0; color: #0f1111; font-size: 13px; font-weight: 700; }
 .review-trust-meter__coverage { margin: 0; color: #6b6f73; font-size: 11px; text-align: right; }
-.review-trust-meter__bar { height: 6px; overflow: hidden; margin-bottom: 10px; background: #eaeded; border-radius: 999px; }
+.review-trust-meter__bar {
+  height: 7px;
+  overflow: hidden;
+  margin-bottom: 10px;
+  background: #eaeded;
+  border-radius: 999px;
+}
 .review-trust-meter__bar span { display: block; height: 100%; background: #067d62; border-radius: inherit; }
+.review-trust-meter--guarded .review-trust-meter__bar span { background: #9a6700; }
 .review-trust-meter--medium .review-trust-meter__bar span { background: #c45500; }
 .review-trust-meter--high .review-trust-meter__bar span { background: #b12704; }
 .review-trust-meter--unknown .review-trust-meter__bar span { background: #6b7280; }
-.review-trust-meter__facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 0; }
+
+.review-trust-meter__facts {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+}
 .review-trust-meter__facts div { min-width: 0; padding: 7px; background: #f7fafa; border-radius: 4px; }
-.review-trust-meter__facts dt { color: #565959; font-size: 11px; }
-.review-trust-meter__facts dd { margin: 1px 0 0; color: #0f1111; font-size: 13px; font-weight: 700; overflow-wrap: anywhere; }
+.review-trust-meter__facts dt { color: #565959; font-size: 10px; }
+.review-trust-meter__facts dd {
+  margin: 2px 0 0;
+  color: #0f1111;
+  font-size: 13px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.review-trust-meter__facts dd small { margin-left: 4px; color: #6b6f73; font-size: 10px; font-weight: 400; }
 .review-trust-meter__histogram { margin: 8px 0 0; color: #565959; font-size: 11px; }
-.review-trust-meter__section-title { margin: 10px 0 4px; color: #0f1111; font-size: 13px; font-weight: 700; }
-.review-trust-meter__reasons { margin: 0; padding: 0; list-style: none; }
-.review-trust-meter__reasons li { display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 8px; align-items: start; padding: 7px 0; border-top: 1px solid #eaeded; color: #37475a; font-size: 12px; }
-.review-trust-meter__reasons strong { display: block; color: #37475a; font-weight: 600; }
-.review-trust-meter__reasons small { display: block; margin-top: 1px; color: #6b6f73; font-size: 11px; overflow-wrap: anywhere; }
-.review-trust-meter__points { display: inline-block; padding: 2px 4px; color: #b12704; background: #fff3ef; border-radius: 4px; font-weight: 700; text-align: center; }
+.review-trust-meter__section-title { margin: 11px 0 4px; color: #0f1111; font-size: 13px; font-weight: 700; }
+
+.review-trust-meter__reasons,
+.review-trust-meter__observations { margin: 0; padding: 0; list-style: none; }
+.review-trust-meter__reasons li {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 7px 0;
+  border-top: 1px solid #eaeded;
+  color: #37475a;
+  font-size: 12px;
+}
+.review-trust-meter__reasons strong,
+.review-trust-meter__observations strong { display: block; color: #37475a; font-weight: 600; }
+.review-trust-meter__reasons small,
+.review-trust-meter__observations small {
+  display: block;
+  margin-top: 1px;
+  color: #6b6f73;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.review-trust-meter__points {
+  display: inline-block;
+  padding: 2px 4px;
+  color: #b12704;
+  background: #fff3ef;
+  border-radius: 4px;
+  font-weight: 700;
+  text-align: center;
+}
+.review-trust-meter__observations li {
+  padding: 6px 0 6px 12px;
+  border-top: 1px solid #eaeded;
+  color: #37475a;
+  font-size: 12px;
+  position: relative;
+}
+.review-trust-meter__observations li::before { content: '•'; position: absolute; left: 1px; color: #6b6f73; }
 .review-trust-meter__none { margin: 5px 0 0; color: #37475a; font-size: 12px; }
-.review-trust-meter__method { margin-top: 9px; padding-top: 8px; color: #565959; border-top: 1px solid #eaeded; font-size: 11px; }
+
+.review-trust-meter__method {
+  margin-top: 10px;
+  padding-top: 8px;
+  color: #565959;
+  border-top: 1px solid #eaeded;
+  font-size: 11px;
+}
 .review-trust-meter__method-title { color: #0f1111; font-weight: 700; }
 .review-trust-meter__method p { margin: 5px 0 0; }
 .review-trust-meter__note { margin: 9px 0 0; color: #6b6f73; font-size: 11px; }
-.review-trust-meter__link { display: block; margin-top: 8px; color: #007185 !important; font-size: 12px; font-weight: 700; text-decoration: none !important; }
+.review-trust-meter__link {
+  display: block;
+  margin-top: 8px;
+  color: #007185 !important;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none !important;
+}
 .review-trust-meter__link:hover { color: #c7511f !important; text-decoration: underline !important; }
+
+@media (max-width: 900px) {
+  .review-trust-meter__facts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
 
 @media (max-width: 520px) {
   .review-trust-meter__summary {
@@ -86,10 +205,11 @@
     gap: 7px 9px;
   }
   .review-trust-meter__label { justify-self: start; }
-  .review-trust-meter__risk { grid-column: 1 / 3; margin-left: 0; }
+  .review-trust-meter__confidence { grid-column: 1 / 3; margin-left: 0; }
   .review-trust-meter__toggle { grid-column: 3; grid-row: 2; }
   .review-trust-meter__details-heading { display: block; }
   .review-trust-meter__coverage { margin-top: 2px; text-align: left; }
+  .review-trust-meter__facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 360px) {

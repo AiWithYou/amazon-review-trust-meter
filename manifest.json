@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Amazon レビュー注意度メーター",
-  "version": "1.2.1",
-  "description": "Amazon.co.jpの商品情報、評価分布、表示レビューをローカル分析し、購入前の注意度を表示します。",
+  "version": "2.0.0",
+  "description": "Amazon.co.jpの星分布、表示レビュー、投稿時系列をローカル複合分析し、注意度と判定確度を表示します。",
   "content_scripts": [
     {
       "matches": [
@@ -10,8 +10,15 @@
         "https://www.amazon.co.jp/*/dp/*",
         "https://www.amazon.co.jp/gp/product/*"
       ],
-      "js": ["content.js"],
-      "css": ["styles.css"],
+      "js": [
+        "scoring-base.js",
+        "scoring-features.js",
+        "scoring.js",
+        "content.js"
+      ],
+      "css": [
+        "styles.css"
+      ],
       "run_at": "document_idle"
     }
   ]
