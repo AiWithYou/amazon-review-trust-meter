@@ -1,0 +1,15 @@
+{
+  "name": "amazon-review-trust-meter",
+  "version": "2.0.3",
+  "private": true,
+  "description": "Local multi-signal Amazon.co.jp review risk analysis Chrome extension",
+  "scripts": {
+    "test": "node --test tests/*.test.cjs",
+    "check": "node --check scoring-base.js && node --check scoring-features.js && node --check scoring.js && node --check content.js && npm test",
+    "package": "pwsh -NoProfile -File scripts/package-extension.ps1",
+    "package:verify": "pwsh -NoProfile -File scripts/verify-package.ps1"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
