@@ -6,8 +6,8 @@ Amazon、Amazon.co.jp、Amazon Vine、サクラチェッカーの公式・提携
 
 ## ダウンロード
 
-- [Amazon レビュー注意度メーター v2.0.3 配布用ZIP](./dist/amazon-review-trust-meter-v2.0.3.zip?raw=1)
-- [SHA-256チェックサム](./dist/SHA256SUMS.txt)
+- [Amazon レビュー注意度メーター v2.0.3 配布用ZIP](https://github.com/AiWithYou/amazon-review-trust-meter/releases/download/v2.0.3/amazon-review-trust-meter-v2.0.3.zip)
+- [SHA-256チェックサム](https://github.com/AiWithYou/amazon-review-trust-meter/releases/download/v2.0.3/SHA256SUMS.txt)
 
 ZIPを展開すると `amazon-review-trust-meter-v2.0.3` フォルダが作成されます。Chromeの「パッケージ化されていない拡張機能を読み込む」から、そのフォルダを選択してください。Chromeウェブストア形式のインストーラーではないため、ZIPのままでは読み込めません。
 
