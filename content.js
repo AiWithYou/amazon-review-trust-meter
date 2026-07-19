@@ -327,7 +327,7 @@
         <div class="review-trust-meter__details">
           <div class="review-trust-meter__details-heading">
             <p class="review-trust-meter__eyebrow">レビュー信頼度・複合分析 v2</p>
-            <p class="review-trust-meter__coverage">取得項目 ${analysis.coverageCount}/${analysis.coverageTotal} · 表示レビューのみ</p>
+            <p class="review-trust-meter__coverage">取得項目 ${analysis.coverageCount}/${analysis.coverageTotal} · 表示レビューのみ・全履歴なし</p>
           </div>
           <div class="review-trust-meter__bar" aria-label="独自注意度 ${analysis.score}%"><span style="width:${analysis.score}%"></span></div>
           <dl class="review-trust-meter__facts">
@@ -345,8 +345,8 @@
           ${createObservationHtml(analysis)}
           <div class="review-trust-meter__method">
             <p class="review-trust-meter__method-title">判定方法</p>
-            <p>レビュー兆候と商品記載を分けて評価します。レビュー側は星分布、本文の重複群、短文率、投稿日バースト、評価方向、購入確認、Vineを複合し、独立した兆候が重なった場合だけ強く加点します。投稿日集中やブランド名だけでは要注意判定にしません。</p>
-            <p>商品記載側は、連続時間、防水・防塵等級、電池容量、発光パターン数など、同じ仕様項目が商品名と説明で矛盾する場合に加点します。複数項目の矛盾は、レビュー兆候が少なくても購入前の確認材料として扱います。</p>
+            <p>レビュー兆候と商品記載を分けて評価します。レビュー側は星分布、本文の重複群、短文率、投稿日バースト、評価方向、参考票、購入確認、Vineを複合し、独立した兆候が重なった場合だけ強く加点します。投稿日集中やブランド名だけでは要注意判定にしません。</p>
+            <p>商品記載側は、連続時間、防水・防塵等級、電池容量、発光パターン数などの仕様矛盾に加え、「世界初」「性能○%向上」「特許・独自技術」など検証しにくい強い訴求が複数種類重なる場合を、購入前の確認材料として扱います。</p>
             <p>補正評価は、表示中レビューの疑わしさで星別分布を小さく再重み付けした参考値です。全レビューを取得していないため、Amazon平均より優先する値ではありません。</p>
           </div>
           <p class="review-trust-meter__note">注意度は「不正レビューである確率」ではありません。Amazon内部の購入・返金・アカウント情報、削除済みレビュー、全投稿履歴は取得していません。</p>
@@ -378,7 +378,18 @@
       title: data.title,
       brand: data.brand,
       detailsLength: data.details.length,
-      reviews: data.reviews.map((review) => [review.id, review.stars, review.date, review.verified, review.vine, review.variation, review.body])
+      reviews: data.reviews.map((review) => [
+        review.id,
+        review.reviewerId,
+        review.stars,
+        review.date,
+        review.verified,
+        review.vine,
+        review.variation,
+        review.helpfulVotes,
+        review.imageCount,
+        review.body
+      ])
     });
   }
 

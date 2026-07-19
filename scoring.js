@@ -49,6 +49,17 @@
     getLabel
   } = features;
 
+  function collectExtraordinaryClaims(title, details) {
+    const text = `${title} ${details}`;
+    const definitions = [
+      { label: '初・唯一をうたう表現', pattern: /(?:世界初|業界初|日本初|初めて搭載|唯一)/i },
+      { label: '最上級・革新表現', pattern: /(?:業界最高|業界最先端|最先端|究極|革新的|新世代の[^。]{0,20}傑作)/i },
+      { label: '大幅な性能向上値', pattern: /(?:\d{2,4}(?:\.\d+)?\s*[%％]\s*(?:向上|UP|アップ)|\d+(?:\.\d+)?\s*倍以上)/i },
+      { label: '独自・特許の訴求', pattern: /(?:特許(?:出願中|取得)|独自(?:開発|技術|構造|設計))/i }
+    ];
+    return definitions.filter((definition) => definition.pattern.test(text)).map((definition) => definition.label);
+  }
+
   function analyzeProduct(input = {}) {
     const averageRating = Number.isFinite(input.averageRating) ? input.averageRating : null;
     const reviewCount = Number.isFinite(input.reviewCount) ? input.reviewCount : null;
@@ -66,7 +77,12 @@
         date: normalizeSpaces(review.date),
         variation: normalizeSpaces(review.variation),
         vine: review.vine === true,
-        verified: typeof review.verified === 'boolean' ? review.verified : null
+        verified: typeof review.verified === 'boolean' ? review.verified : null,
+        reviewerId: normalizeSpaces(review.reviewerId),
+        helpfulVotes: review.helpfulVotes === null || review.helpfulVotes === undefined || !Number.isFinite(Number(review.helpfulVotes))
+          ? null
+          : Math.max(0, Number(review.helpfulVotes)),
+        imageCount: Number.isFinite(Number(review.imageCount)) ? Math.max(0, Math.floor(Number(review.imageCount))) : 0
       }));
 
     const signals = [];
@@ -84,10 +100,25 @@
     if (repeated && repeated.count >= 2) {
       addSignal(signals, 'repeated_keyword', 'listing', repeated.count >= 3 ? 4 : 3, 1, '商品名で同じ語が繰り返されている', `「${repeated.word}」${repeated.count}回`);
     }
-    const promotionalTerms = ['最高', '最強', '驚き', '大音量', '重低音', '高音質', '先端', '究極', '圧倒的', '革命', '超強力']
+    const promotionalTerms = [
+      '最高', '最強', '驚き', '大音量', '重低音', '高音質', '先端', '究極', '圧倒的', '革命', '超強力',
+      '世界初', '業界初', '超小型', 'パワフル', '省エネ', '一台多役'
+    ]
       .filter((term) => title.includes(term));
     if (promotionalTerms.length >= 5) {
       addSignal(signals, 'promotional_title', 'listing', 4, 1, '強い宣伝表現が商品名に集中', promotionalTerms.join('・'));
+    }
+    const extraordinaryClaims = collectExtraordinaryClaims(title, details);
+    if (extraordinaryClaims.length >= 4) {
+      addSignal(
+        signals,
+        'extraordinary_claim_density',
+        'listing',
+        6,
+        1,
+        '検証しにくい強い商品訴求が重なる',
+        extraordinaryClaims.join('・')
+      );
     }
     const claimConflicts = collectClaimConflicts(title, details);
     if (claimConflicts.length) {
@@ -108,6 +139,7 @@
     }
 
     // 評価分布は単独では弱い根拠として扱う。
+    let polarizedDistribution = false;
     if (distributionData.usable) {
       const p = distributionData.normalized;
       const five = p[5];
@@ -123,7 +155,11 @@
       }
 
       if (five >= 0.7 && one >= 0.14 && middle <= 0.18) {
+        polarizedDistribution = true;
         addSignal(signals, 'polarized_distribution', 'distribution', 8, countReliability, '★5と★1への二極化が強い', `★5 ${Math.round(five * 100)}% / ★1 ${Math.round(one * 100)}%`);
+      } else if (five >= 0.75 && one >= 0.08 && middle <= 0.18 && Number(reviewCount) >= 30) {
+        polarizedDistribution = true;
+        addSignal(signals, 'moderate_polarized_distribution', 'distribution', 6, countReliability, '高評価中心だが低評価側にも山がある', `★5 ${Math.round(five * 100)}% / ★1 ${Math.round(one * 100)}%`);
       }
 
       if (entropy !== null && entropy < 0.28 && five >= 0.85 && Number(reviewCount) >= 15) {
@@ -184,6 +220,36 @@
     const genericPositive = positiveReviews.filter((item) => item.analysis.genericness >= 0.68);
     const genericNegative = negativeReviews.filter((item) => item.analysis.genericness >= 0.68);
 
+    const mostHelpfulPositive = positiveReviews.reduce((maximum, item) => Math.max(maximum, item.review.helpfulVotes || 0), 0);
+    const mostHelpfulNegative = negativeReviews.reduce((maximum, item) => Math.max(maximum, item.review.helpfulVotes || 0), 0);
+    if (
+      polarizedDistribution &&
+      negativeReviews.length >= 1 &&
+      mostHelpfulNegative >= 5 &&
+      mostHelpfulNegative >= Math.max(5, mostHelpfulPositive * 1.8)
+    ) {
+      addSignal(
+        signals,
+        'helpful_negative_contrast',
+        'coordination',
+        6,
+        Math.min(reviewQuantityReliability, countReliability),
+        '高評価中心の分布に対し低評価レビューへの参考票が突出',
+        `低評価 最大${mostHelpfulNegative}票 / 高評価 最大${mostHelpfulPositive}票`
+      );
+    }
+
+    const positiveImageReviews = positiveReviews.filter((item) => item.review.imageCount > 0);
+    const positiveImageCount = positiveImageReviews.reduce((sum, item) => sum + item.review.imageCount, 0);
+    if (polarizedDistribution && positiveImageReviews.length >= 2 && positiveImageCount >= 5) {
+      addObservation(
+        observations,
+        'positive_review_images',
+        '高評価側の表示レビューに画像添付がある',
+        `${positiveImageReviews.length}/${positiveReviews.length}件・計${positiveImageCount}枚（単独では加点しません）`
+      );
+    }
+
     if (textClusters.largestSize >= 3 && textClusters.strength >= 0.35) {
       addSignal(
         signals,
@@ -241,6 +307,27 @@
     if (temporalBurst) {
       const directionRatio = Math.max(temporalBurst.highRatio, temporalBurst.lowRatio);
       coordinatedDirection = temporalSupport.direction;
+      let hasPolarizedTimeOverlap = false;
+
+      if (
+        polarizedDistribution &&
+        temporalSupport.direction === 'positive' &&
+        temporalBurst.vineRatio < 0.5 &&
+        temporalBurst.strength >= 0.25 &&
+        temporalBurst.highRatio >= 0.85 &&
+        temporalBurst.count >= Math.max(5, Math.ceil(temporalBurst.total * 0.4))
+      ) {
+        hasPolarizedTimeOverlap = true;
+        addSignal(
+          signals,
+          'polarized_time_overlap',
+          'coordination',
+          10,
+          Math.min(reviewQuantityReliability, countReliability),
+          '評価の二極化と短期の高評価集中が重なる',
+          `${temporalBurst.windowDays}日以内に高評価 ${temporalBurst.count}/${temporalBurst.total}件（${temporalBurst.start}〜${temporalBurst.end}）`
+        );
+      }
 
       if (temporalBurst.vineRatio >= 0.5) {
         addObservation(observations, 'vine_launch_burst', '短期間集中の多くがVineレビュー', `${temporalBurst.windowDays}日以内に${temporalBurst.count}/${temporalBurst.total}件、Vine ${Math.round(temporalBurst.vineRatio * 100)}%`);
@@ -256,9 +343,12 @@
             coordinatedDirection === 'positive' ? '高評価が短期間に集中' : '低評価が短期間に集中',
             evidence
           );
-        } else {
+        } else if (!hasPolarizedTimeOverlap) {
           addObservation(observations, 'uncorroborated_time_cluster', '表示レビューに短期間の日付集中がある', `${evidence}（選択表示された標本のため単独では加点しません）`);
         }
+      } else if (!hasPolarizedTimeOverlap && temporalBurst.strength >= 0.25 && directionRatio >= 0.8) {
+        const evidence = `${temporalBurst.windowDays}日以内に${temporalBurst.count}/${temporalBurst.total}件（${temporalBurst.start}〜${temporalBurst.end}）`;
+        addObservation(observations, 'uncorroborated_time_cluster', '表示レビューに短期間の日付集中がある', `${evidence}（選択表示された標本のため単独では加点しません）`);
       }
 
       if (temporalBurst.vineRatio < 0.5 && temporalBurst.strength >= 0.4 && temporalSupport.burstDuplicateRatio >= 0.4 && textClusters.strength >= 0.35) {
