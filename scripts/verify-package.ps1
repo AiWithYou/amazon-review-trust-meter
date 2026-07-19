@@ -27,6 +27,18 @@ $runtimeFiles = @(
   'README.md'
 )
 $expectedEntries = @($runtimeFiles | ForEach-Object { "$artifactName/$($_.Replace('\', '/'))" })
+$strictUtf8 = [System.Text.UTF8Encoding]::new($false, $true)
+
+function Get-NormalizedTextBytes {
+  param(
+    [Parameter(Mandatory)]
+    [byte[]]$Bytes
+  )
+
+  $text = $strictUtf8.GetString($Bytes)
+  $normalizedText = $text.Replace("`r`n", "`n").Replace("`r", "`n")
+  return $strictUtf8.GetBytes($normalizedText)
+}
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $archive = [System.IO.Compression.ZipFile]::OpenRead($resolvedZipPath)
@@ -57,8 +69,15 @@ try {
     }
 
     $sourceBytes = [System.IO.File]::ReadAllBytes((Join-Path $repoRoot $relativePath))
-    $sourceHash = [System.Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($sourceBytes))
-    $packagedHash = [System.Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($packagedBytes))
+    # Git may rewrite text line endings during a Windows checkout. Compare the
+    # UTF-8 contents after newline normalization while still rejecting invalid
+    # UTF-8, BOM changes, missing files, extra files, and other content changes.
+    $sourceHash = [System.Convert]::ToHexString(
+      [System.Security.Cryptography.SHA256]::HashData((Get-NormalizedTextBytes -Bytes $sourceBytes))
+    )
+    $packagedHash = [System.Convert]::ToHexString(
+      [System.Security.Cryptography.SHA256]::HashData((Get-NormalizedTextBytes -Bytes $packagedBytes))
+    )
     if ($sourceHash -ne $packagedHash) {
       throw "Packaged file does not match the source: $relativePath"
     }
