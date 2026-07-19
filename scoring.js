@@ -30,6 +30,7 @@
     getCountReliability,
     findRepeatedTitleWord,
     collectClaimConflicts,
+    brandMatchesTitle,
     getGenericness,
     findTextClusters,
     findDateCluster,
@@ -94,7 +95,16 @@
         .slice(0, 3)
         .map((conflict) => `${conflict.label}: 商品名 ${conflict.title.join('/')} ↔ 説明 ${conflict.details.join('/')}`)
         .join('、');
-      addSignal(signals, 'claim_conflicts', 'listing', Math.min(8, 4 + (claimConflicts.length - 1) * 2), 0.9, '商品名と説明の仕様値が一致しない', evidence);
+      const conflictPoints = claimConflicts.reduce((sum, conflict) => sum + conflict.weight, 0);
+      addSignal(
+        signals,
+        'claim_conflicts',
+        'listing',
+        Math.min(GROUP_CAPS.listing, conflictPoints),
+        1,
+        claimConflicts.length >= 2 ? '商品名と説明で複数の仕様値が一致しない' : '商品名と説明の仕様値が一致しない',
+        evidence
+      );
     }
 
     // 評価分布は単独では弱い根拠として扱う。
@@ -276,16 +286,23 @@
     }
 
     const groupScores = capSignalsByGroup(signals);
-    let score = Object.values(groupScores).reduce((sum, value) => sum + value, 0);
+    const listingRiskScore = groupScores.listing;
+    let reviewRiskScore = Math.round(clamp(
+      Object.entries(groupScores)
+        .filter(([groupKey]) => groupKey !== 'listing')
+        .reduce((sum, [, value]) => sum + value, 0),
+      0,
+      100
+    ));
     const strongCoreGroups = ['distribution', 'text', 'temporal', 'provenance']
       .filter((groupKey) => groupScores[groupKey] >= ({ distribution: 6, text: 8, temporal: 6, provenance: 5 }[groupKey]));
     const hasReviewEvidence = groupScores.text + groupScores.temporal + groupScores.provenance + groupScores.coordination > 0;
 
-    if (!hasReviewEvidence) score = Math.min(score, 32);
-    else if (strongCoreGroups.length === 0 && groupScores.coordination < 8) score = Math.min(score, 38);
-    else if (strongCoreGroups.length === 1 && groupScores.coordination < 8) score = Math.min(score, 48);
-    if (reviews.length < 6) score = Math.min(score, 45);
-    score = Math.round(clamp(score, 0, 100));
+    if (!hasReviewEvidence) reviewRiskScore = Math.min(reviewRiskScore, 32);
+    else if (strongCoreGroups.length === 0 && groupScores.coordination < 8) reviewRiskScore = Math.min(reviewRiskScore, 38);
+    else if (strongCoreGroups.length === 1 && groupScores.coordination < 8) reviewRiskScore = Math.min(reviewRiskScore, 48);
+    if (reviews.length < 6) reviewRiskScore = Math.min(reviewRiskScore, 45);
+    const score = Math.round(clamp(reviewRiskScore + listingRiskScore, 0, 100));
 
     const sufficient = confidenceInfo.value >= 35 && Number.isFinite(averageRating) && (distributionData.usable || reviews.length >= 6);
     const adjusted = computeAdjustedRating({
@@ -298,9 +315,7 @@
     const classification = getLabel(score, sufficient, confidenceInfo.value);
 
     if (brand && title) {
-      const normalizedBrand = brand.normalize('NFKC').toLowerCase().replace(/[^a-z0-9ぁ-んァ-ヶ一-龠々ー]/g, '');
-      const normalizedTitle = title.normalize('NFKC').toLowerCase().replace(/[^a-z0-9ぁ-んァ-ヶ一-龠々ー]/g, '');
-      if (normalizedBrand && !normalizedTitle.includes(normalizedBrand)) {
+      if (!brandMatchesTitle(brand, title)) {
         addObservation(observations, 'brand_not_in_title', 'ブランド名が商品名に含まれていない', `${brand}（不正判定には加点しません）`);
       }
     }
@@ -309,6 +324,8 @@
       version: 2,
       score,
       riskScore: score,
+      reviewRiskScore,
+      listingRiskScore,
       sufficient,
       label: classification.label,
       tone: classification.tone,

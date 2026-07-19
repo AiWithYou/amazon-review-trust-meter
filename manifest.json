@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Amazon レビュー注意度メーター",
-  "version": "2.0.0",
-  "description": "Amazon.co.jpの星分布、表示レビュー、投稿時系列をローカル複合分析し、注意度と判定確度を表示します。",
+  "version": "2.0.1",
+  "description": "Amazon.co.jpのレビュー兆候と商品記載の整合性をローカル複合分析し、購入前の注意度を表示します。",
   "content_scripts": [
     {
       "matches": [

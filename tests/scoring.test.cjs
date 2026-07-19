@@ -49,7 +49,7 @@ function cleanReviews() {
 test('manifest・package・構文がv2で整合する', () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
   const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
-  assert.equal(manifest.version, '2.0.0');
+  assert.equal(manifest.version, '2.0.1');
   assert.equal(packageJson.version, manifest.version);
   assert.deepEqual(manifest.content_scripts[0].js, ['scoring-base.js', 'scoring-features.js', 'scoring.js', 'content.js']);
   assert.equal(manifest.permissions, undefined);
@@ -71,6 +71,16 @@ test('商品画像のfloatをclearして大きな空白を作らない', () => {
   const cardRule = styles.match(/#review-trust-meter-card\.review-trust-meter\s*\{([^}]*)\}/)?.[1] || '';
   assert.match(cardRule, /clear:\s*none\s*;/);
   assert.doesNotMatch(cardRule, /clear:\s*both\s*;/);
+});
+
+test('折りたたみ表示は補正★・判定・注意度・詳細だけを並べる', () => {
+  const source = fs.readFileSync(path.join(root, 'content.js'), 'utf8');
+  const summary = source.match(/<summary class="review-trust-meter__summary">([\s\S]*?)<\/summary>/)?.[1] || '';
+  assert.match(summary, /\$\{scoreHtml\}/);
+  assert.match(summary, /review-trust-meter__label/);
+  assert.match(summary, /review-trust-meter__risk">注意度/);
+  assert.match(summary, /詳細を見る/);
+  assert.doesNotMatch(summary, /分析材料|判定確度|レビュー兆候|商品記載/);
 });
 
 test('挿入位置は質問・評価行の直後を優先し、購入ボックスを探索しない', () => {
@@ -236,6 +246,67 @@ test('ブランド名が商品名にないことだけでは加点しない', ()
   });
   assert.ok(!result.signals.some((signal) => signal.id === 'brand_missing'));
   assert.ok(result.observations.some((item) => item.id === 'brand_not_in_title'));
+});
+
+test('エレコムの新製品は発売直後の日付集中やブランド別名で誤警告しない', () => {
+  const bodies = [
+    '箱を開けた第一印象は大きい。ベアリング支持は滑らかだが汚れで抵抗が出るため掃除が必要。細かな操作は二本指で快適です。',
+    '初日は難しかったが3日目には普通に使え、一週間で慣れました。不満は設定アプリの対応が遅れていることです。',
+    '前モデルからアップグレードしました。ボールを弾く移動は快適ですが微調整は少し独特です。',
+    '二か月メインで使用。操作は滑らかですが手を広げるので疲れ、親指のボタン操作に負担を感じます。',
+    'ExpertMouseから乗り換え。ベアリング式で摩擦が少なく、低床で手首が疲れません。',
+    'Excellent feel and smooth movement, but the buttons require setup for my workflow.',
+    '前モデルから乗り換え。クリック音と接続方式は改善しましたが、価格とボール操作音には不満があります。',
+    '説明不要なほど大きいですが機能が多く、設置スペースがあれば所有感が満たされます。'
+  ];
+  const dates = ['2026-01-20', '2026-04-16', '2026-05-01', '2026-04-21', '2026-06-01', '2026-06-11', '2026-02-24', '2026-01-11'];
+  const stars = [5, 4, 5, 3, 5, 5, 4, 5];
+  const result = scoring.analyzeProduct({
+    averageRating: 4.2,
+    reviewCount: 132,
+    distribution: { 5: 56, 4: 20, 3: 14, 2: 6, 1: 4 },
+    title: 'エレコム トラックボールマウス HUGE PLUS 静音 ベアリング支持 充電式 Bluetooth 無線2.4GHz 有線 3台マルチペアリング 10ボタン チルトホイール 2年保証 ブラック M-HT1MRBK-G',
+    brand: 'エレコム(ELECOM)',
+    details: '直径52mm。Bluetoothと無線2.4GHzと有線の3種接続。3台まで同時接続。ベアリング支持。チルトホイール。',
+    reviews: bodies.map((body, index) => ({ stars: stars[index], date: dates[index], body, verified: true }))
+  });
+
+  assert.ok(result.score < 25, `正常な新製品の注意度が高すぎる: ${result.score}`);
+  assert.equal(result.reviewRiskScore, 0);
+  assert.equal(result.listingRiskScore, 0);
+  assert.equal(result.label, '目立つ異常は少ない');
+  assert.ok(!result.observations.some((item) => item.id === 'brand_not_in_title'));
+  assert.ok(!result.signals.some((signal) => signal.id === 'directional_time_burst'));
+});
+
+test('Axloieはレビュー兆候と分けて複数の商品記載矛盾を要注意にする', () => {
+  const result = scoring.analyzeProduct({
+    averageRating: 4.0,
+    reviewCount: 134,
+    distribution: { 5: 42, 4: 29, 3: 21, 2: 5, 1: 3 },
+    title: 'Bluetooth スピーカー ワイヤレス スピーカー【2020 2種類の発光パターン】大音量 重低音 ポータブル 45mmラッパ TWS二台接続可能 12時間連続再生 内蔵マイク ハンズフリー通話 LEDライト 発光 スマホスピーカー IPX6生活防水 Auxポート&TFカード(microSD)スロット対応 アウトドア お風呂 iP',
+    brand: 'Axloie',
+    details: '最大10時間連続再生。4種類の発光モード。IP56防塵防水対応。',
+    reviews: [
+      { stars: 5, date: '2020-09-25', body: '音質と低音が良く、バッテリーも長く持ちます。毎日シャワー中にも使っています。', verified: true },
+      { stars: 4, date: '2020-12-05', body: '音は大きいですが端子がむき出しで、防水性能には不安があります。', verified: true },
+      { stars: 3, date: '2020-09-15', body: '音楽には使えますが動画では音声がかなり遅れます。', verified: true },
+      { stars: 5, date: '2021-03-12', body: '白い本体でサイズもちょうど良く、イルミネーションを消せる点が便利です。', verified: true },
+      { stars: 4, date: '2021-12-10', body: '音も見栄えも良いです。', verified: true },
+      { stars: 3, date: '2020-11-16', body: 'Bluetooth接続とTWS接続に難がありますが、音質は良いです。', verified: true },
+      { stars: 5, date: '2023-05-08', body: '普通に良い。', verified: true },
+      { stars: 2, date: '2022-10-11', body: '希望する音量に対して小さかったです。', verified: true }
+    ]
+  });
+
+  assert.equal(result.reviewRiskScore, 0);
+  assert.ok(result.listingRiskScore >= 58, `商品記載の注意度が低すぎる: ${result.listingRiskScore}`);
+  assert.ok(result.score >= 65, `総合注意度が低すぎる: ${result.score}`);
+  assert.equal(result.label, '要注意');
+  const conflictSignal = result.signals.find((signal) => signal.id === 'claim_conflicts');
+  assert.match(conflictSignal?.evidence || '', /連続時間/);
+  assert.match(conflictSignal?.evidence || '', /防水・防塵等級/);
+  assert.match(conflictSignal?.evidence || '', /発光パターン数/);
 });
 
 test('欠損データでは安全そうな数値を捏造しない', () => {

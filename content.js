@@ -291,12 +291,15 @@
     card.id = CARD_ID;
     card.className = `review-trust-meter review-trust-meter--${analysis.tone}`;
     card.dataset.riskScore = String(analysis.score);
+    card.dataset.reviewRiskScore = String(analysis.reviewRiskScore);
+    card.dataset.listingRiskScore = String(analysis.listingRiskScore);
     card.dataset.analysisSufficient = String(analysis.sufficient);
     card.setAttribute('aria-label', 'Amazonレビュー注意度メーター');
 
-    const scoreHtml = analysis.sufficient
-      ? `<span class="review-trust-meter__score"><span class="review-trust-meter__score-label">注意度</span><strong>${analysis.score}</strong><span class="review-trust-meter__out-of"> / 100</span></span>`
-      : '<span class="review-trust-meter__score review-trust-meter__score--unknown">判定不能</span>';
+    const summaryRating = Number.isFinite(analysis.adjustedRating) ? analysis.adjustedRating : null;
+    const scoreHtml = Number.isFinite(summaryRating)
+      ? `<span class="review-trust-meter__score"><span aria-hidden="true">★</span><strong>${summaryRating.toFixed(1)}</strong><span class="review-trust-meter__out-of"> / 5</span></span>`
+      : '<span class="review-trust-meter__score review-trust-meter__score--unknown">★ —</span>';
     const adjustedText = Number.isFinite(analysis.adjustedRating)
       ? `★ ${analysis.adjustedRating.toFixed(1)}${Math.abs(analysis.adjustmentDelta || 0) >= 0.05 ? `<small>${formatSigned(analysis.adjustmentDelta, 1)}</small>` : ''}`
       : '算出不可';
@@ -310,7 +313,7 @@
         <summary class="review-trust-meter__summary">
           ${scoreHtml}
           <span class="review-trust-meter__label">${escapeHtml(analysis.label)}</span>
-          <span class="review-trust-meter__confidence">判定確度 <strong>${analysis.confidence}%</strong></span>
+          <span class="review-trust-meter__risk">注意度 <strong>${analysis.score} / 100</strong></span>
           <span class="review-trust-meter__toggle">
             <span class="review-trust-meter__toggle-open">詳細を見る</span>
             <span class="review-trust-meter__toggle-close">閉じる</span>
@@ -325,7 +328,9 @@
           <dl class="review-trust-meter__facts">
             <div><dt>Amazon平均</dt><dd>${Number.isFinite(averageRating) ? `★ ${averageRating.toFixed(1)}` : '取得不可'}</dd></div>
             <div><dt>補正評価（参考）</dt><dd>${adjustedText}</dd></div>
-            <div><dt>判定確度</dt><dd>${analysis.confidence}%（${escapeHtml(analysis.confidenceLabel)}）</dd></div>
+            <div><dt>レビュー兆候</dt><dd>${analysis.reviewRiskScore} / 100</dd></div>
+            <div><dt>商品記載</dt><dd>${analysis.listingRiskScore} / 100</dd></div>
+            <div><dt>分析材料</dt><dd>${analysis.confidence}%（${escapeHtml(analysis.confidenceLabel)}）</dd></div>
             <div><dt>評価・レビュー数</dt><dd>${Number.isFinite(reviewCount) ? `${reviewCount.toLocaleString('ja-JP')}件` : '取得不可'}</dd></div>
             <div><dt>本文分析</dt><dd>${analysis.sampleSize}件</dd></div>
           </dl>
@@ -335,7 +340,8 @@
           ${createObservationHtml(analysis)}
           <div class="review-trust-meter__method">
             <p class="review-trust-meter__method-title">判定方法</p>
-            <p>星分布、本文の重複群、短文率、投稿日バースト、評価方向、購入確認、Vine、商品記載の整合性を別々に評価し、独立した兆候が重なった場合だけ強く加点します。投稿日集中や無名ブランドだけでは要注意判定にしません。</p>
+            <p>レビュー兆候と商品記載を分けて評価します。レビュー側は星分布、本文の重複群、短文率、投稿日バースト、評価方向、購入確認、Vineを複合し、独立した兆候が重なった場合だけ強く加点します。投稿日集中やブランド名だけでは要注意判定にしません。</p>
+            <p>商品記載側は、連続時間、防水・防塵等級、電池容量、発光パターン数など、同じ仕様項目が商品名と説明で矛盾する場合に加点します。複数項目の矛盾は、レビュー兆候が少なくても購入前の確認材料として扱います。</p>
             <p>補正評価は、表示中レビューの疑わしさで星別分布を小さく再重み付けした参考値です。全レビューを取得していないため、Amazon平均より優先する値ではありません。</p>
           </div>
           <p class="review-trust-meter__note">注意度は「不正レビューである確率」ではありません。Amazon内部の購入・返金・アカウント情報、削除済みレビュー、全投稿履歴は取得していません。</p>

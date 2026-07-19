@@ -13,7 +13,7 @@
   const DAY_MS = 24 * 60 * 60 * 1000;
   const STARS = [1, 2, 3, 4, 5];
   const GROUP_CAPS = Object.freeze({
-    listing: 10,
+    listing: 65,
     distribution: 16,
     text: 28,
     temporal: 14,
@@ -156,9 +156,10 @@
 
   function collectClaimConflicts(title, details) {
     const definitions = [
-      { label: '連続時間', pattern: /(\d+(?:\.\d+)?)\s*時間/gi },
-      { label: '防水・防塵等級', pattern: /\b(IP(?:X\d|\d{2}))\b/gi },
-      { label: '電池容量', pattern: /(\d{3,6}(?:,\d{3})?)\s*mAh/gi }
+      { label: '連続時間', weight: 18, pattern: /(\d+(?:\.\d+)?)\s*時間/gi },
+      { label: '防水・防塵等級', weight: 28, pattern: /\b(IP(?:X\d|\d{2}))\b/gi },
+      { label: '電池容量', weight: 18, pattern: /(\d{3,6}(?:,\d{3})?)\s*mAh/gi },
+      { label: '発光パターン数', weight: 12, pattern: /(\d+)\s*種類(?:の)?(?:発光|ライト|点灯)(?:パターン|モード|色)?/gi }
     ];
     const conflicts = [];
 
@@ -167,9 +168,27 @@
       const inDetails = collectMatches(details, definition.pattern);
       if (!inTitle.length || !inDetails.length) continue;
       if (inTitle.some((value) => inDetails.includes(value))) continue;
-      conflicts.push({ label: definition.label, title: inTitle, details: inDetails });
+      conflicts.push({ label: definition.label, weight: definition.weight, title: inTitle, details: inDetails });
     }
     return conflicts;
+  }
+
+  function getBrandAliases(brand) {
+    return normalizeSpaces(brand)
+      .normalize('NFKC')
+      .toLowerCase()
+      .match(/[a-z0-9][a-z0-9.+-]{1,}|[ぁ-んァ-ヶ一-龠々ー]{2,}/g) || [];
+  }
+
+  function brandMatchesTitle(brand, title) {
+    const normalizedTitle = normalizeSpaces(title)
+      .normalize('NFKC')
+      .toLowerCase()
+      .replace(/[^a-z0-9ぁ-んァ-ヶ一-龠々ー]/g, '');
+    return getBrandAliases(brand).some((alias) => {
+      const normalizedAlias = alias.replace(/[^a-z0-9ぁ-んァ-ヶ一-龠々ー]/g, '');
+      return normalizedAlias.length >= 2 && normalizedTitle.includes(normalizedAlias);
+    });
   }
 
   function getGenericness(value) {
@@ -409,6 +428,7 @@
     getCountReliability,
     findRepeatedTitleWord,
     collectClaimConflicts,
+    brandMatchesTitle,
     getGenericness,
     isGenericReviewBody,
     getReviewTextSimilarity,
