@@ -201,11 +201,16 @@
   }
 
   function getReviewTitle(reviewElement) {
-    const titleElement = reviewElement.querySelector('[data-hook="review-title"]');
+    const titleElement = reviewElement.querySelector('[data-hook="reviewTitle"], [data-hook="review-title"]');
     if (!titleElement) return '';
     const clone = titleElement.cloneNode(true);
     clone.querySelectorAll('.a-icon-alt, [data-hook="review-star-rating"], [data-hook="cmps-review-star-rating"]').forEach((element) => element.remove());
     return normalizeSpaces(clone.textContent);
+  }
+
+  function getReviewBody(reviewElement) {
+    const bodyElement = reviewElement.querySelector('[data-hook="reviewText"], [data-hook="review-body"]');
+    return normalizeSpaces(bodyElement?.innerText || bodyElement?.textContent);
   }
 
   function getReviewerId(reviewElement) {
@@ -227,7 +232,7 @@
         reviewerId: getReviewerId(reviewElement),
         stars: parseReviewStarText(starText),
         title: getReviewTitle(reviewElement),
-        body: normalizeSpaces(reviewElement.querySelector('[data-hook="review-body"]')?.textContent),
+        body: getReviewBody(reviewElement),
         date: parseReviewDate(reviewElement.querySelector('[data-hook="review-date"]')?.textContent),
         verified: vine ? false : Boolean(verifiedBadge),
         vine,
@@ -438,6 +443,8 @@
     createFingerprint,
     findInsertionPoint,
     getAsin,
+    getReviewBody,
+    getReviewTitle,
     parseAverageRatingText,
     parseHistogramLabel,
     parseHelpfulVotes,

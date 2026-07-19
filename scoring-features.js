@@ -114,10 +114,11 @@
     return 'neutral';
   }
 
-  function analyzeIndividualReviews(reviews, textClusters, temporalBurst) {
+  function analyzeIndividualReviews(reviews, textClusters, temporalBurst, temporalCorroborated = false) {
     const burstMembers = new Set(temporalBurst?.indices || []);
     const suspiciousBurst = Boolean(
       temporalBurst &&
+      temporalCorroborated &&
       temporalBurst.strength >= 0.45 &&
       temporalBurst.vineRatio < 0.5 &&
       Math.max(temporalBurst.highRatio, temporalBurst.lowRatio) >= 0.67

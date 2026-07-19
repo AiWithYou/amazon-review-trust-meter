@@ -195,7 +195,8 @@
     const original = normalizeSpaces(value).normalize('NFKC');
     const body = normalizeReviewBody(original);
     const length = charLength(body);
-    if (!length) return 1;
+    // 本文を取得できない状態は「汎用文」ではなく、判定不能として扱う。
+    if (!length) return 0;
 
     let score = 0;
     if (length <= 8) score = 1;

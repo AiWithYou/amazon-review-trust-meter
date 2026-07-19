@@ -1,6 +1,6 @@
 {
   "name": "amazon-review-trust-meter",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "private": true,
   "description": "Local multi-signal Amazon.co.jp review risk analysis Chrome extension",
   "scripts": {
