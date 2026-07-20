@@ -56,6 +56,28 @@
     return denominator ? numerator / denominator : fallback;
   }
 
+  function wilsonLowerBound(successes, total, z = 1.96) {
+    const sampleSize = Math.max(0, Math.floor(Number(total) || 0));
+    const successCount = clamp(Math.floor(Number(successes) || 0), 0, sampleSize);
+    if (!sampleSize) return 0;
+
+    const probability = successCount / sampleSize;
+    const zSquared = z ** 2;
+    const denominator = 1 + zSquared / sampleSize;
+    const centre = probability + zSquared / (2 * sampleSize);
+    const margin = z * Math.sqrt(
+      (probability * (1 - probability) + zSquared / (4 * sampleSize)) / sampleSize
+    );
+    return clamp((centre - margin) / denominator, 0, 1);
+  }
+
+  function smoothstep(value, edge0, edge1) {
+    if (!Number.isFinite(value)) return 0;
+    if (edge0 === edge1) return value >= edge1 ? 1 : 0;
+    const progress = clamp((value - edge0) / (edge1 - edge0), 0, 1);
+    return progress * progress * (3 - 2 * progress);
+  }
+
   function normalizeSpaces(value) {
     return String(value || '').replace(/\s+/g, ' ').trim();
   }
@@ -286,16 +308,26 @@
   function getSimilarityThreshold(minimumLength) {
     // 単語分割に依存しない日本語の文字n-gram比較。単独一致ではなく、
     // 後段のクラスタ密度・時系列・評価方向との重なりで誤検知を抑える。
-    if (minimumLength < 30) return 0.62;
-    if (minimumLength < 60) return 0.39;
+    // 42文字未満は文字2-gramになり、独立した短い定型文でも重なりやすいので
+    // 厳しくする。長さが増えるほど閾値が上がらない単調非増加の階段にする。
+    if (minimumLength < 30) return 0.68;
+    if (minimumLength < 42) return 0.49;
+    if (minimumLength < 60) return 0.44;
     if (minimumLength < 120) return 0.4;
     return 0.38;
   }
 
   function findTextClusters(reviews) {
     const eligible = reviews
-      .map((review, index) => ({ index, body: review.body || '', length: charLength(normalizeReviewBody(review.body)) }))
-      .filter((item) => item.length >= 18);
+      .map((review, index) => ({
+        index,
+        body: review.body || '',
+        length: charLength(normalizeReviewBody(review.body)),
+        genericness: getGenericness(review.body)
+      }))
+      // 短い汎用文は同一原因でクラスタ所属と汎用度が二重加算されやすい。
+      // 高適合率を優先し、汎用度の高い本文は類似クラスタ自体から除外する。
+      .filter((item) => item.length >= 18 && item.genericness < 0.68);
     const unionFind = new UnionFind(reviews.length);
     const matchingPairs = [];
 
@@ -418,6 +450,8 @@
     POSITIVE_PATTERN,
     clamp,
     safeDivide,
+    wilsonLowerBound,
+    smoothstep,
     normalizeSpaces,
     normalizeReviewBody,
     charLength,
@@ -433,6 +467,7 @@
     getGenericness,
     isGenericReviewBody,
     getReviewTextSimilarity,
+    getSimilarityThreshold,
     findTextClusters,
     findDateCluster
   };

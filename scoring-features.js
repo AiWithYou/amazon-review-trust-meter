@@ -22,6 +22,8 @@
     PROMOTIONAL_REVIEW_PATTERN,
     clamp,
     safeDivide,
+    wilsonLowerBound,
+    smoothstep,
     normalizeReviewBody,
     charLength,
     roundTo,
@@ -51,13 +53,34 @@
       const zScore = variance > 0 ? (cluster.count - expectedCount) / Math.sqrt(variance) : 0;
       const excessRatio = cluster.ratio - expectedRatio;
       const quantityFactor = clamp((dated.length - 5) / 7, 0.25, 1);
-      const strength = clamp(
-        (Math.max(0, excessRatio - 0.12) / 0.5) * 0.65 + (Math.max(0, zScore - 1.5) / 4) * 0.35,
+      // 3種類の窓を全位置で走査した最大値は、単一窓のz値より大きくなりやすい。
+      // 走査統計の簡易補正として立ち上がりを2.4へ引き上げる。
+      const scanAdjustedStrength = clamp(
+        (Math.max(0, excessRatio - 0.12) / 0.5) * 0.65 + (Math.max(0, zScore - 2.4) / 4) * 0.35,
         0,
         1
       ) * quantityFactor;
 
-      const candidate = { ...cluster, spanDays, expectedRatio, excessRatio, zScore, strength };
+      const oldestTimestamp = dated[0].timestamp;
+      const clusterStartTimestamp = Date.parse(cluster.start);
+      const frontToleranceDays = Math.max(3, Math.min(14, windowDays * 0.25));
+      const frontAnchored = Number.isFinite(clusterStartTimestamp) &&
+        (clusterStartTimestamp - oldestTimestamp) / DAY_MS <= frontToleranceDays;
+      // 観測期間の先頭に接する集中は発売直後の自然集中と区別しにくいため減衰する。
+      const launchEdgeFactor = frontAnchored ? 0.45 : 1;
+      const strength = scanAdjustedStrength * launchEdgeFactor;
+
+      const candidate = {
+        ...cluster,
+        spanDays,
+        expectedRatio,
+        excessRatio,
+        zScore,
+        scanAdjustedStrength,
+        frontAnchored,
+        launchEdgeFactor,
+        strength
+      };
       if (!best || candidate.strength > best.strength || (candidate.strength === best.strength && candidate.count > best.count)) {
         best = candidate;
       }
@@ -73,7 +96,8 @@
     const highRatio = safeDivide(members.filter((review) => Number(review.stars) >= 4).length, members.length, 0);
     const lowRatio = safeDivide(members.filter((review) => Number(review.stars) <= 2).length, members.length, 0);
     const vineRatio = safeDivide(members.filter((review) => review.vine === true).length, members.length, 0);
-    const genericRatio = safeDivide(members.filter((review) => getGenericness(review.body) >= 0.68).length, members.length, 0);
+    const genericCount = members.filter((review) => getGenericness(review.body) >= 0.68).length;
+    const genericRatio = safeDivide(genericCount, members.length, 0);
     const burstMean = meanStars(members);
     const outsideMean = meanStars(outside);
 
@@ -83,6 +107,9 @@
       lowRatio,
       vineRatio,
       genericRatio,
+      genericLowerBound: wilsonLowerBound(genericCount, members.length),
+      highLowerBound: wilsonLowerBound(members.filter((review) => Number(review.stars) >= 4).length, members.length),
+      lowLowerBound: wilsonLowerBound(members.filter((review) => Number(review.stars) <= 2).length, members.length),
       burstMean,
       outsideMean,
       ratingShift: Number.isFinite(burstMean) && Number.isFinite(outsideMean) ? Math.abs(burstMean - outsideMean) : null
@@ -91,7 +118,8 @@
 
   function addSignal(signals, id, groupKey, rawPoints, reliability, text, evidence) {
     const effectiveReliability = clamp(Number.isFinite(reliability) ? reliability : 1, 0, 1);
-    const points = Math.max(1, Math.round(rawPoints * effectiveReliability));
+    const points = Math.round(Math.max(0, rawPoints) * effectiveReliability);
+    if (points <= 0) return false;
     signals.push({
       id,
       groupKey,
@@ -102,6 +130,7 @@
       text,
       evidence: evidence || ''
     });
+    return true;
   }
 
   function addObservation(observations, id, text, evidence) {
@@ -114,14 +143,17 @@
     return 'neutral';
   }
 
-  function analyzeIndividualReviews(reviews, textClusters, temporalBurst, temporalCorroborated = false) {
+  function analyzeIndividualReviews(reviews, textClusters, temporalBurst, temporalCorroboration = 0) {
     const burstMembers = new Set(temporalBurst?.indices || []);
+    const temporalCorroborationStrength = typeof temporalCorroboration === 'boolean'
+      ? Number(temporalCorroboration)
+      : clamp(Number(temporalCorroboration) || 0, 0, 1);
     const suspiciousBurst = Boolean(
       temporalBurst &&
-      temporalCorroborated &&
+      temporalCorroborationStrength > 0 &&
       temporalBurst.strength >= 0.45 &&
       temporalBurst.vineRatio < 0.5 &&
-      Math.max(temporalBurst.highRatio, temporalBurst.lowRatio) >= 0.67
+      Math.max(temporalBurst.highLowerBound, temporalBurst.lowLowerBound) >= 0.43
     );
 
     return reviews.map((review, index) => {
@@ -131,16 +163,29 @@
       let risk = 0.02;
 
       if (cluster?.size >= 3) {
-        risk += 0.38 + Math.min(0.2, (cluster.size - 3) * 0.06) + Math.max(0, cluster.averageSimilarity - 0.65) * 0.35;
+        const clusterRamp = smoothstep(textClusters.strength, 0.315, 0.385);
+        risk += clusterRamp * (
+          0.38 +
+          Math.min(0.2, (cluster.size - 3) * 0.06) +
+          Math.max(0, cluster.averageSimilarity - 0.65) * 0.35
+        );
       } else if (cluster?.maximumSimilarity >= 0.9) {
         risk += 0.2;
       }
-      if (genericness >= 0.8) risk += 0.14;
-      else if (genericness >= 0.68) risk += 0.08;
+      // 汎用本文はクラスタ対象外だが、将来の入力互換も考えて二重加算を防ぐ。
+      if (!cluster) {
+        risk += 0.08 * smoothstep(genericness, 0.612, 0.748);
+        risk += 0.06 * smoothstep(genericness, 0.72, 0.88);
+      }
       if (review.verified === false && review.vine !== true) risk += 0.07;
-      if (suspiciousBurst && burstMembers.has(index)) risk += 0.18 * temporalBurst.strength;
+      if (suspiciousBurst && burstMembers.has(index)) {
+        risk += 0.18 * temporalCorroborationStrength * temporalBurst.strength * smoothstep(temporalBurst.strength, 0.405, 0.495);
+      }
       if (PROMOTIONAL_REVIEW_PATTERN.test(String(review.body || ''))) risk += 0.08;
       if (genericness <= 0.2 && charLength(normalizeReviewBody(review.body)) >= 60) risk -= 0.05;
+      const helpfulVotes = Math.max(0, Number(review.helpfulVotes) || 0);
+      // 参考票は操作される可能性もあるため、加点には使わず最大0.06だけ減衰する。
+      risk -= Math.min(0.06, Math.log10(1 + helpfulVotes) * 0.025);
       if (review.vine === true) risk *= 0.35;
 
       return {

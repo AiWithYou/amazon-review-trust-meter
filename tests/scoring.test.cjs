@@ -5,6 +5,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const scoring = require('../scoring.js');
+const base = require('../scoring-base.js');
+const features = require('../scoring-features.js');
 const extension = require('../content.js');
 
 const root = path.join(__dirname, '..');
@@ -67,7 +69,7 @@ function polarizedFanReviews() {
 test('manifest・package・構文がv2で整合する', () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
   const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
-  assert.equal(manifest.version, '2.0.4');
+  assert.equal(manifest.version, '2.1.0');
   assert.equal(packageJson.version, manifest.version);
   assert.equal(packageJson.license, 'MIT');
   assert.match(fs.readFileSync(path.join(root, 'LICENSE'), 'utf8'), /^MIT License\r?\n/);
@@ -475,4 +477,232 @@ test('星別割合は丸め誤差を正規化して平均を計算する', () =>
   assert.equal(info.valid, true);
   const rating = scoring.getWeightedRating({ 5: 70, 4: 20, 3: 7, 2: 2, 1: 2 });
   assert.ok(rating > 4.5 && rating < 4.6);
+});
+
+test('評価方向と整合するratingShiftは時系列バーストの裏付けだけに使う', () => {
+  const reviews = [
+    { stars: 2, date: '2024-01-03', body: '初期ロットを半年使いましたが、端子が緩くなり接続が途切れることがありました。', verified: true },
+    { stars: 3, date: '2024-06-11', body: '価格相応の性能です。充電時間は約二時間で、動作音は少し大きめでした。', verified: true },
+    { stars: 2, date: '2025-01-09', body: '仕事用に購入しましたが、連続使用では発熱が気になり別製品へ交換しました。', verified: true },
+    { stars: 3, date: '2025-08-17', body: '操作は簡単ですが、付属ケーブルが短く設置場所を選ぶ点が惜しいです。', verified: true },
+    { stars: 5, date: '2026-06-01', body: '改良版は接続が安定し、ノートPCで毎日八時間使っても切断しませんでした。', verified: true },
+    { stars: 5, date: '2026-06-03', body: '新しい端子は差し込みが固く、机から動かしても通信が安定していました。', verified: true },
+    { stars: 5, date: '2026-06-05', body: '二台のPCで切り替えて一週間試し、どちらも認識が速くて便利でした。', verified: true },
+    { stars: 5, date: '2026-06-07', body: '会議中に長時間使いましたが、以前気になった発熱が小さくなっています。', verified: true },
+    { stars: 5, date: '2026-06-09', body: '付属ケーブルの長さが机に合い、映像出力と充電を同時に利用できました。', verified: true },
+    { stars: 5, date: '2026-06-11', body: '出張先のモニターでもすぐ認識し、四日間の利用で接続不良はありませんでした。', verified: true }
+  ];
+  const result = scoring.analyzeProduct({
+    averageRating: 4.0,
+    reviewCount: 180,
+    distribution: { 5: 60, 4: 10, 3: 15, 2: 10, 1: 5 },
+    title: 'Example USB-C ドッキングステーション 改良版',
+    brand: 'Example',
+    details: '映像出力、USB-C充電、データ転送に対応。',
+    reviews
+  });
+
+  const burst = features.findTemporalBurst(reviews);
+  assert.ok(burst.ratingShift >= 0.8);
+  assert.ok(burst.burstMean > burst.outsideMean);
+  assert.ok(result.signals.some((signal) => signal.id === 'directional_time_burst'));
+  assert.ok(!result.signals.some((signal) => signal.id === 'rating_shift'), 'ratingShift単独の加点シグナルを作らない');
+  assert.deepEqual(
+    Object.keys(result.diagnostics.temporalBurst).sort(),
+    ['count', 'highRatio', 'lowRatio', 'strength', 'total', 'vineRatio', 'windowDays'],
+    'analyzeProductの公開diagnostics形状を変えない'
+  );
+
+  const oppositeReviews = reviews.map((review, index) => ({
+    ...review,
+    stars: index < 4 ? 5 : 4
+  }));
+  const oppositeBurst = features.findTemporalBurst(oppositeReviews);
+  assert.ok(oppositeBurst.ratingShift >= 0.8);
+  assert.ok(oppositeBurst.burstMean < oppositeBurst.outsideMean);
+  const oppositeResult = scoring.analyzeProduct({
+    averageRating: 4.1,
+    reviewCount: 180,
+    distribution: { 5: 35, 4: 50, 3: 10, 2: 3, 1: 2 },
+    title: 'Example USB-C ドッキングステーション 改良版',
+    brand: 'Example',
+    details: '映像出力、USB-C充電、データ転送に対応。',
+    reviews: oppositeReviews
+  });
+  assert.ok(
+    !oppositeResult.signals.some((signal) => signal.id === 'directional_time_burst'),
+    'バースト方向と逆のratingShiftは裏付けにしない'
+  );
+});
+
+test('同一reviewerIdの同方向投稿を中程度の投稿属性シグナルにする', () => {
+  const result = scoring.analyzeProduct({
+    averageRating: 4.2,
+    reviewCount: 240,
+    distribution: { 5: 62, 4: 22, 3: 8, 2: 4, 1: 4 },
+    title: 'Example Bluetooth Keyboard',
+    brand: 'Example',
+    details: '日本語配列、Bluetooth接続、USB-C充電。',
+    reviews: [
+      { reviewerId: 'same-reviewer', stars: 5, date: '2021-01-01', body: '自宅PCで三か月使い、キー入力と接続は安定しています。', verified: true },
+      { reviewerId: 'same-reviewer', stars: 4, date: '2022-03-01', body: '職場用にも購入し、切替操作は簡単ですがキー音は少し大きめです。', verified: true },
+      { reviewerId: '', stars: 5, date: '2023-05-01', body: 'タブレットとの接続が速く、充電も一週間ほど持ちました。', verified: true },
+      { reviewerId: '', stars: 5, date: '2024-07-01', body: '机の奥行きに収まり、矢印キーの配置も使いやすいです。', verified: true },
+      { reviewerId: 'other-a', stars: 3, date: '2025-02-01', body: '配列には慣れが必要ですが、接続そのものは安定しています。', verified: true },
+      { reviewerId: 'other-b', stars: 2, date: '2026-01-01', body: '一部のキーが重く感じたため、長文入力には向きませんでした。', verified: true }
+    ]
+  });
+
+  const duplicateReviewer = result.signals.find((signal) => signal.id === 'duplicate_reviewer_direction');
+  assert.equal(duplicateReviewer?.points, 8);
+  assert.equal(result.groupScores.provenance, 8);
+});
+
+test('発売直後30日の自然な高評価集中は前方減衰で加点しない', () => {
+  const launchBodies = [
+    '発売日に届き、寝室で弱運転を三時間試すと音が小さく快適でした。',
+    '一週間毎日使い、タイマーと温度設定が説明書どおりに動きました。',
+    '六畳の部屋では中設定で十分暖まり、持ち手も熱くなりませんでした。',
+    '朝の台所で使用すると立ち上がりが速く、操作ボタンも分かりやすいです。',
+    '安全停止を試したところ転倒時にすぐ止まり、再起動も正常でした。',
+    '弱運転なら乾燥が少なく、就寝中も表示ランプの明るさは許容範囲です。',
+    'フィルターを外して掃除でき、二週間使っても異音はありませんでした。',
+    '電源コードは短めですが、机の下で使う用途には十分な長さでした。'
+  ];
+  const reviews = launchBodies.map((body, index) => ({
+    stars: 5,
+    date: `2024-01-${String(index * 4 + 1).padStart(2, '0')}`,
+    body,
+    verified: true
+  })).concat([
+    { stars: 4, date: '2024-10-10', body: '一冬使って暖房性能は維持していますが、掃除は月一回必要です。', verified: true },
+    { stars: 5, date: '2025-03-18', body: '二年目もタイマーが正確で、弱運転の音はほとんど気になりません。', verified: true },
+    { stars: 4, date: '2025-12-02', body: '脱衣所では十分暖かい一方、広い部屋全体には出力不足です。', verified: true },
+    { stars: 5, date: '2026-05-21', body: '収納後に再使用しても異臭はなく、温度設定も以前と同じでした。', verified: true }
+  ]);
+  const result = scoring.analyzeProduct({
+    averageRating: 4.6,
+    reviewCount: 85,
+    distribution: { 5: 76, 4: 18, 3: 4, 2: 1, 1: 1 },
+    title: 'Seasonal Heater New Model',
+    brand: 'Seasonal',
+    details: '温度3段階、タイマー、安全停止機能。',
+    reviews
+  });
+
+  assert.equal(features.findTemporalBurst(reviews).frontAnchored, true);
+  assert.ok(!result.signals.some((signal) => ['directional_time_burst', 'polarized_time_overlap', 'co_burst_duplicate_campaign', 'co_burst_generic_campaign'].includes(signal.id)));
+  assert.equal(result.reviewRiskScore, 0);
+});
+
+test('独立した短文高評価の言い換え5件は本文クラスタを形成しない', () => {
+  const reviews = [
+    '使いやすくて満足です。配送も早く助かりました。',
+    '操作が簡単で気に入りました。到着も予定どおりです。',
+    '扱いやすい商品でした。梱包も丁寧で満足しています。',
+    'すぐ使えて便利です。発送が早かった点も良かったです。',
+    '使い方が分かりやすく、届くまでの時間も短かったです。'
+  ].map((body) => ({ stars: 5, body }));
+  const clusters = base.findTextClusters(reviews);
+  assert.equal(clusters.largestSize, 0);
+  assert.equal(clusters.clusters.length, 0);
+});
+
+test('小標本の4/6未購入高評価はWilson下限でシグナル化しない', () => {
+  assert.ok(base.wilsonLowerBound(4, 6) < 0.4);
+  const result = scoring.analyzeProduct({
+    averageRating: 4.5,
+    reviewCount: 120,
+    distribution: { 5: 72, 4: 18, 3: 6, 2: 2, 1: 2 },
+    title: 'Example Compact Stand',
+    brand: 'Example',
+    details: '角度調整、折りたたみ対応。',
+    reviews: [
+      '使いやすくて満足です。配送も早く助かりました。',
+      '操作が簡単で気に入りました。到着も予定どおりです。',
+      '扱いやすい商品でした。梱包も丁寧で満足しています。',
+      'すぐ使えて便利です。発送が早かった点も良かったです。',
+      '角度を三段階で変えられ、タブレットでも安定しました。',
+      '机で一か月使い、折りたたみ部分の緩みはありません。'
+    ].map((body, index) => ({
+      stars: 5,
+      date: `${2020 + index}-01-01`,
+      body,
+      verified: index >= 4
+    }))
+  });
+  assert.ok(!result.signals.some((signal) => signal.id === 'unverified_positive_cluster'));
+});
+
+test('高得点フィクスチャでレビュー1件除去時のスコア変動を12点以内に抑える', () => {
+  const reviews = campaignReviews();
+  const input = {
+    averageRating: 4.8,
+    reviewCount: 326,
+    distribution: { 5: 92, 4: 5, 3: 1, 2: 0, 1: 2 },
+    title: 'Bluetooth スピーカー 高音質 大音量 重低音 最強 究極 圧倒的 超強力 ワイヤレススピーカー 防水',
+    brand: 'XQZZ',
+    details: '最大12時間再生。IPX6防水。'
+  };
+  const baseline = scoring.analyzeProduct({ ...input, reviews }).score;
+  const deltas = reviews.map((_, removedIndex) => {
+    const score = scoring.analyzeProduct({ ...input, reviews: reviews.filter((__, index) => index !== removedIndex) }).score;
+    return Math.abs(score - baseline);
+  });
+  assert.ok(Math.max(...deltas) <= 12, `1件除去による最大変動が大きすぎる: ${Math.max(...deltas)}`);
+});
+
+test('低件数のrating_mismatchは加点せず観測情報へ降格する', () => {
+  const result = scoring.analyzeProduct({
+    averageRating: 4.8,
+    reviewCount: 8,
+    distribution: { 5: 50, 4: 20, 3: 10, 2: 10, 1: 10 },
+    title: 'Example Portable Speaker',
+    brand: 'Example',
+    details: 'USB-C充電、Bluetooth接続。',
+    reviews: cleanReviews().slice(0, 6)
+  });
+  assert.ok(!result.signals.some((signal) => signal.id === 'rating_mismatch'));
+  assert.ok(result.observations.some((item) => item.id === 'rating_mismatch_observation'));
+});
+
+test('addSignalは丸め後0点のシグナルを追加しない', () => {
+  const signals = [];
+  const added = features.addSignal(signals, 'zero_point', 'text', 10, 0.01, '表示されないシグナル', '低信頼度');
+  assert.equal(added, false);
+  assert.deepEqual(signals, []);
+});
+
+test('類似度閾値は本文長に対して単調非増加で短文2-gramを厳しくする', () => {
+  const lengths = [18, 29, 30, 41, 42, 59, 60, 119, 120, 240];
+  const thresholds = lengths.map((length) => base.getSimilarityThreshold(length));
+  for (let index = 1; index < thresholds.length; index += 1) {
+    assert.ok(thresholds[index] <= thresholds[index - 1], `${lengths[index]}文字で閾値が上昇した`);
+  }
+  assert.ok(base.getSimilarityThreshold(35) > 0.39);
+});
+
+test('参考票はレビュー単位リスクを最大0.06だけ弱く減衰する', () => {
+  const review = {
+    stars: 5,
+    body: '絶対におすすめです。三か月使い、USB-C充電と接続の安定性を確認しました。',
+    verified: false,
+    vine: false,
+    helpfulVotes: 0
+  };
+  const reviewsWithoutVotes = [review];
+  const reviewsWithVotes = [{ ...review, helpfulVotes: 1000 }];
+  const riskWithoutVotes = features.analyzeIndividualReviews(
+    reviewsWithoutVotes,
+    base.findTextClusters(reviewsWithoutVotes),
+    null
+  )[0].risk;
+  const riskWithVotes = features.analyzeIndividualReviews(
+    reviewsWithVotes,
+    base.findTextClusters(reviewsWithVotes),
+    null
+  )[0].risk;
+  const reduction = riskWithoutVotes - riskWithVotes;
+  assert.ok(reduction > 0);
+  assert.ok(reduction <= 0.061, `参考票による減衰が大きすぎる: ${reduction}`);
 });

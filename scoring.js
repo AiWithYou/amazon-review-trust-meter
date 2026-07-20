@@ -20,6 +20,8 @@
     POSITIVE_PATTERN,
     clamp,
     safeDivide,
+    wilsonLowerBound,
+    smoothstep,
     normalizeSpaces,
     normalizeReviewBody,
     charLength,
@@ -42,12 +44,28 @@
     findTemporalBurst,
     addSignal,
     addObservation,
+    getReviewDirection,
     analyzeIndividualReviews,
     computeAdjustedRating,
     capSignalsByGroup,
     calculateConfidence,
     getLabel
   } = features;
+
+  const WILSON_THRESHOLDS = Object.freeze({
+    // 7/9 and 6/8 both retain support, while 4/6 remains below the gate.
+    // This keeps the small-sample guard without a one-review score cliff.
+    unverifiedPositive: 0.4,
+    unverifiedNegative: 0.5,
+    genericDirection: 0.45,
+    burstGeneric: 0.35,
+    burstDuplicate: 0.15,
+    directionModerate: 0.43
+  });
+
+  function getDirectionCount(reviews, direction) {
+    return reviews.filter((review) => getReviewDirection(review) === direction).length;
+  }
 
   function collectExtraordinaryClaims(title, details) {
     const text = `${title} ${details}`;
@@ -148,9 +166,12 @@
       const positive = p[4] + p[5];
       const entropy = getDistributionEntropy(p);
 
-      if (five >= 0.92 && Number(reviewCount) >= 20) {
-        addSignal(signals, 'extreme_five_star_skew', 'distribution', five >= 0.97 ? 10 : 7, countReliability, '★5への集中が極端', `★5 ${Math.round(five * 100)}% / ${reviewCount.toLocaleString('ja-JP')}件`);
-      } else if (positive >= 0.98 && p[1] + p[2] <= 0.01 && Number(reviewCount) >= 30) {
+      if (Number(reviewCount) >= 20) {
+        const fiveStarRamp = smoothstep(five, 0.828, 0.99);
+        const fiveStarPoints = fiveStarRamp * (7 + 3 * smoothstep(five, 0.93, 0.99));
+        addSignal(signals, 'extreme_five_star_skew', 'distribution', fiveStarPoints, countReliability, '★5への集中が極端', `★5 ${Math.round(five * 100)}% / ${reviewCount.toLocaleString('ja-JP')}件`);
+      }
+      if (positive >= 0.98 && p[1] + p[2] <= 0.01 && Number(reviewCount) >= 30) {
         addSignal(signals, 'near_perfect_distribution', 'distribution', 6, countReliability, '高評価だけにほぼ集中', `★4〜5 ${Math.round(positive * 100)}%`);
       }
 
@@ -169,7 +190,26 @@
       const weightedRating = getWeightedRating(distribution);
       const mismatch = Number.isFinite(averageRating) ? Math.abs(weightedRating - averageRating) : 0;
       if (mismatch >= 0.24) {
-        addSignal(signals, 'rating_mismatch', 'distribution', mismatch >= 0.45 ? 10 : 7, countReliability, '平均評価と星別分布が整合しにくい', `表示 ${averageRating.toFixed(1)} / 分布換算 ${weightedRating.toFixed(1)}`);
+        const mismatchRamp = smoothstep(mismatch, 0.315, 0.385);
+        const reliabilityRamp = smoothstep(countReliability, 0.65, 0.8);
+        const mismatchPoints = mismatchRamp * (7 + 3 * smoothstep(mismatch, 0.405, 0.495));
+        const added = addSignal(
+          signals,
+          'rating_mismatch',
+          'distribution',
+          mismatchPoints,
+          countReliability * reliabilityRamp,
+          '平均評価と星別分布が整合しにくい',
+          `表示 ${averageRating.toFixed(1)} / 分布換算 ${weightedRating.toFixed(1)}`
+        );
+        if (!added) {
+          addObservation(
+            observations,
+            'rating_mismatch_observation',
+            '表示平均と星別分布の単純平均に差がある',
+            `表示 ${averageRating.toFixed(1)} / 分布換算 ${weightedRating.toFixed(1)}（Amazonの重み付け平均を考慮し単独では加点しません）`
+          );
+        }
       }
 
       if (!distributionData.valid) {
@@ -185,40 +225,105 @@
     const rawNegativeReviews = reviews.filter((review) => Number(review.stars) <= 2);
     const rawNonVinePositive = rawPositiveReviews.filter((review) => review.vine !== true);
     const rawNonVineNegative = rawNegativeReviews.filter((review) => review.vine !== true);
-    const positiveUnverifiedRatio = safeDivide(rawNonVinePositive.filter((review) => review.verified === false).length, rawNonVinePositive.length, 0);
-    const negativeUnverifiedRatio = safeDivide(rawNonVineNegative.filter((review) => review.verified === false).length, rawNonVineNegative.length, 0);
+    const positiveUnverifiedCount = rawNonVinePositive.filter((review) => review.verified === false).length;
+    const negativeUnverifiedCount = rawNonVineNegative.filter((review) => review.verified === false).length;
+    const positiveUnverifiedLowerBound = wilsonLowerBound(positiveUnverifiedCount, rawNonVinePositive.length);
+    const negativeUnverifiedLowerBound = wilsonLowerBound(negativeUnverifiedCount, rawNonVineNegative.length);
     const temporalSupport = {
       burstDuplicateCount: 0,
       burstDuplicateRatio: 0,
+      burstDuplicateLowerBound: 0,
       direction: null,
       directionalUnverifiedSupport: false,
+      unverifiedSupportStrength: 0,
       directionalDistributionSupport: false,
+      distributionSupportStrength: 0,
+      ratingShiftSupport: false,
+      corroborationStrength: 0,
       corroborated: false
     };
 
     if (temporalBurst) {
       temporalSupport.burstDuplicateCount = temporalBurst.indices.filter((index) => Number.isInteger(textClusters.membership[index])).length;
       temporalSupport.burstDuplicateRatio = safeDivide(temporalSupport.burstDuplicateCount, temporalBurst.count, 0);
+      temporalSupport.burstDuplicateLowerBound = wilsonLowerBound(temporalSupport.burstDuplicateCount, temporalBurst.count);
       temporalSupport.direction = temporalBurst.highRatio >= temporalBurst.lowRatio ? 'positive' : 'negative';
-      temporalSupport.directionalUnverifiedSupport = temporalSupport.direction === 'positive'
-        ? rawNonVinePositive.length >= 6 && positiveUnverifiedRatio >= 0.65
-        : rawNonVineNegative.length >= 5 && negativeUnverifiedRatio >= 0.7;
-      temporalSupport.directionalDistributionSupport = distributionData.usable && (
-        temporalSupport.direction === 'positive'
-          ? distributionData.normalized[5] >= 0.92
-          : distributionData.normalized[1] >= 0.16
+      const unverifiedThreshold = temporalSupport.direction === 'positive'
+        ? WILSON_THRESHOLDS.unverifiedPositive
+        : WILSON_THRESHOLDS.unverifiedNegative;
+      const unverifiedLowerBound = temporalSupport.direction === 'positive'
+        ? positiveUnverifiedLowerBound
+        : negativeUnverifiedLowerBound;
+      const enoughDirectionalReviews = temporalSupport.direction === 'positive'
+        ? rawNonVinePositive.length >= 6
+        : rawNonVineNegative.length >= 5;
+      const unverifiedSupportStrength = enoughDirectionalReviews
+        ? smoothstep(unverifiedLowerBound, unverifiedThreshold * 0.9, unverifiedThreshold * 1.1)
+        : 0;
+      temporalSupport.unverifiedSupportStrength = unverifiedSupportStrength;
+      temporalSupport.directionalUnverifiedSupport = unverifiedSupportStrength > 0;
+      const distributionSupportStrength = distributionData.usable
+        ? temporalSupport.direction === 'positive'
+          ? smoothstep(distributionData.normalized[5], 0.828, 0.99)
+          : smoothstep(distributionData.normalized[1], 0.144, 0.176)
+        : 0;
+      temporalSupport.distributionSupportStrength = distributionSupportStrength;
+      temporalSupport.directionalDistributionSupport = distributionSupportStrength > 0;
+      temporalSupport.ratingShiftSupport = Number.isFinite(temporalBurst.ratingShift) &&
+        temporalBurst.ratingShift >= 0.8 &&
+        Number.isFinite(temporalBurst.burstMean) &&
+        Number.isFinite(temporalBurst.outsideMean) &&
+        (
+          (temporalSupport.direction === 'positive' && temporalBurst.burstMean > temporalBurst.outsideMean) ||
+          (temporalSupport.direction === 'negative' && temporalBurst.burstMean < temporalBurst.outsideMean)
+        );
+      const duplicateSupportStrength =
+        smoothstep(textClusters.strength, 0.315, 0.385) *
+        smoothstep(temporalSupport.burstDuplicateLowerBound, 0.135, 0.165);
+      const aggregateSupportStrength =
+        distributionSupportStrength *
+        smoothstep(temporalBurst.genericLowerBound, 0.315, 0.385);
+      temporalSupport.corroborationStrength = Math.max(
+        duplicateSupportStrength,
+        unverifiedSupportStrength,
+        aggregateSupportStrength,
+        Number(temporalSupport.ratingShiftSupport)
       );
-      const duplicateSupport = textClusters.strength >= 0.35 && temporalSupport.burstDuplicateRatio >= 0.4;
-      const aggregateSupport = temporalSupport.directionalDistributionSupport && temporalBurst.genericRatio >= 0.55;
-      temporalSupport.corroborated = duplicateSupport || temporalSupport.directionalUnverifiedSupport || aggregateSupport;
+      temporalSupport.corroborated = temporalSupport.corroborationStrength > 0;
     }
 
-    const individualReviews = analyzeIndividualReviews(reviews, textClusters, temporalBurst, temporalSupport.corroborated);
+    const reviewerGroups = new Map();
+    for (const review of reviews) {
+      if (!review.reviewerId) continue;
+      if (!reviewerGroups.has(review.reviewerId)) reviewerGroups.set(review.reviewerId, []);
+      reviewerGroups.get(review.reviewerId).push(review);
+    }
+    const alignedReviewerGroups = [...reviewerGroups.values()]
+      .map((group) => ({ group, directions: new Set(group.map((review) => getReviewDirection(review))) }))
+      .filter(({ group, directions }) => group.length >= 2 && directions.size === 1 && !directions.has('neutral'))
+      .sort((left, right) => right.group.length - left.group.length);
+    if (alignedReviewerGroups.length) {
+      const largestReviewerGroup = alignedReviewerGroups[0];
+      const direction = getReviewDirection(largestReviewerGroup.group[0]);
+      addSignal(
+        signals,
+        'duplicate_reviewer_direction',
+        'provenance',
+        largestReviewerGroup.group.length >= 3 ? 10 : 8,
+        1,
+        '同じ投稿者による同方向のレビューがページ内で重複',
+        `${largestReviewerGroup.group.length}件・${direction === 'positive' ? '高評価方向' : '低評価方向'}（同方向の重複投稿者群 ${alignedReviewerGroups.length}組）`
+      );
+    }
+
+    const individualReviews = analyzeIndividualReviews(reviews, textClusters, temporalBurst, temporalSupport.corroborationStrength);
 
     const positiveReviews = reviews.map((review, index) => ({ review, analysis: individualReviews[index] })).filter((item) => item.analysis.direction === 'positive');
     const negativeReviews = reviews.map((review, index) => ({ review, analysis: individualReviews[index] })).filter((item) => item.analysis.direction === 'negative');
     const genericPositive = positiveReviews.filter((item) => item.analysis.genericness >= 0.68);
     const genericNegative = negativeReviews.filter((item) => item.analysis.genericness >= 0.68);
+    const genericPositiveLowerBound = wilsonLowerBound(genericPositive.length, positiveReviews.length);
+    const genericNegativeLowerBound = wilsonLowerBound(genericNegative.length, negativeReviews.length);
 
     const mostHelpfulPositive = positiveReviews.reduce((maximum, item) => Math.max(maximum, item.review.helpfulVotes || 0), 0);
     const mostHelpfulNegative = negativeReviews.reduce((maximum, item) => Math.max(maximum, item.review.helpfulVotes || 0), 0);
@@ -250,12 +355,13 @@
       );
     }
 
-    if (textClusters.largestSize >= 3 && textClusters.strength >= 0.35) {
+    if (textClusters.largestSize >= 3) {
+      const duplicateRamp = smoothstep(textClusters.strength, 0.315, 0.385);
       addSignal(
         signals,
         'duplicate_text_cluster',
         'text',
-        14 + Math.min(10, (textClusters.largestSize - 3) * 3),
+        duplicateRamp * (14 + Math.min(10, (textClusters.largestSize - 3) * 3)),
         reviewQuantityReliability,
         '似た本文のレビュー群がある',
         `${textClusters.largestSize}/${textClusters.eligibleCount}件、平均類似度 ${Math.round(textClusters.averageSimilarity * 100)}%`
@@ -266,13 +372,13 @@
 
     if (positiveReviews.length >= 5) {
       const ratio = genericPositive.length / positiveReviews.length;
-      if (ratio >= 0.6) {
+      if (genericPositiveLowerBound >= WILSON_THRESHOLDS.genericDirection) {
         addObservation(observations, 'generic_positive_concentration', '高評価レビューに短文・汎用表現が多い', `${genericPositive.length}/${positiveReviews.length}件（${Math.round(ratio * 100)}%、単独では加点しません）`);
       }
     }
     if (negativeReviews.length >= 4) {
       const ratio = genericNegative.length / negativeReviews.length;
-      if (ratio >= 0.65) {
+      if (genericNegativeLowerBound >= WILSON_THRESHOLDS.genericDirection) {
         addObservation(observations, 'generic_negative_concentration', '低評価レビューに短文・汎用表現が多い', `${genericNegative.length}/${negativeReviews.length}件（${Math.round(ratio * 100)}%、単独では加点しません）`);
       }
     }
@@ -293,36 +399,47 @@
     const unverifiedPositive = nonVinePositive.filter((item) => item.review.verified === false);
     const nonVineNegative = negativeReviews.filter((item) => item.review.vine !== true);
     const unverifiedNegative = nonVineNegative.filter((item) => item.review.verified === false);
-    const positiveTextSupport = textClusters.strength >= 0.35 || safeDivide(genericPositive.length, positiveReviews.length, 0) >= 0.6;
-    const negativeTextSupport = textClusters.strength >= 0.35 || safeDivide(genericNegative.length, negativeReviews.length, 0) >= 0.65;
+    const positiveTextSupport = textClusters.strength >= 0.35 || genericPositiveLowerBound >= WILSON_THRESHOLDS.genericDirection;
+    const negativeTextSupport = textClusters.strength >= 0.35 || genericNegativeLowerBound >= WILSON_THRESHOLDS.genericDirection;
 
-    if (nonVinePositive.length >= 6 && unverifiedPositive.length / nonVinePositive.length >= 0.65 && positiveTextSupport) {
+    if (
+      nonVinePositive.length >= 6 &&
+      wilsonLowerBound(unverifiedPositive.length, nonVinePositive.length) >= WILSON_THRESHOLDS.unverifiedPositive &&
+      positiveTextSupport
+    ) {
       addSignal(signals, 'unverified_positive_cluster', 'provenance', 9, reviewQuantityReliability, '購入確認のない高評価が他の兆候と重なる', `${unverifiedPositive.length}/${nonVinePositive.length}件`);
     }
-    if (nonVineNegative.length >= 5 && unverifiedNegative.length / nonVineNegative.length >= 0.7 && negativeTextSupport) {
+    if (
+      nonVineNegative.length >= 5 &&
+      wilsonLowerBound(unverifiedNegative.length, nonVineNegative.length) >= WILSON_THRESHOLDS.unverifiedNegative &&
+      negativeTextSupport
+    ) {
       addSignal(signals, 'unverified_negative_cluster', 'provenance', 9, reviewQuantityReliability, '購入確認のない低評価が他の兆候と重なる', `${unverifiedNegative.length}/${nonVineNegative.length}件`);
     }
 
     let coordinatedDirection = null;
     if (temporalBurst) {
-      const directionRatio = Math.max(temporalBurst.highRatio, temporalBurst.lowRatio);
       coordinatedDirection = temporalSupport.direction;
+      const directionCount = temporalSupport.direction === 'positive'
+        ? getDirectionCount(temporalBurst.indices.map((index) => reviews[index]), 'positive')
+        : getDirectionCount(temporalBurst.indices.map((index) => reviews[index]), 'negative');
+      const directionLowerBound = wilsonLowerBound(directionCount, temporalBurst.count);
       let hasPolarizedTimeOverlap = false;
 
       if (
         polarizedDistribution &&
         temporalSupport.direction === 'positive' &&
         temporalBurst.vineRatio < 0.5 &&
-        temporalBurst.strength >= 0.25 &&
-        temporalBurst.highRatio >= 0.85 &&
         temporalBurst.count >= Math.max(5, Math.ceil(temporalBurst.total * 0.4))
       ) {
-        hasPolarizedTimeOverlap = true;
-        addSignal(
+        const overlapPoints = 10 *
+          smoothstep(temporalBurst.strength, 0.18, 0.22) *
+          smoothstep(temporalBurst.highLowerBound, 0.495, 0.605);
+        hasPolarizedTimeOverlap = addSignal(
           signals,
           'polarized_time_overlap',
           'coordination',
-          10,
+          overlapPoints,
           Math.min(reviewQuantityReliability, countReliability),
           '評価の二極化と短期の高評価集中が重なる',
           `${temporalBurst.windowDays}日以内に高評価 ${temporalBurst.count}/${temporalBurst.total}件（${temporalBurst.start}〜${temporalBurst.end}）`
@@ -331,14 +448,20 @@
 
       if (temporalBurst.vineRatio >= 0.5) {
         addObservation(observations, 'vine_launch_burst', '短期間集中の多くがVineレビュー', `${temporalBurst.windowDays}日以内に${temporalBurst.count}/${temporalBurst.total}件、Vine ${Math.round(temporalBurst.vineRatio * 100)}%`);
-      } else if (temporalBurst.strength >= 0.5 && directionRatio >= 0.7) {
+      } else if (
+        temporalBurst.strength >= 0.45 &&
+        directionLowerBound >= WILSON_THRESHOLDS.directionModerate
+      ) {
         const evidence = `${temporalBurst.windowDays}日以内に${temporalBurst.count}/${temporalBurst.total}件（${temporalBurst.start}〜${temporalBurst.end}）`;
         if (temporalSupport.corroborated) {
           addSignal(
             signals,
             'directional_time_burst',
             'temporal',
-            temporalBurst.strength >= 0.8 ? 12 : 8,
+            temporalSupport.corroborationStrength *
+              smoothstep(temporalBurst.strength, 0.45, 0.55) *
+              smoothstep(directionLowerBound, 0.405, 0.55) *
+              (8 + 4 * smoothstep(temporalBurst.strength, 0.72, 0.88)),
             reviewQuantityReliability,
             coordinatedDirection === 'positive' ? '高評価が短期間に集中' : '低評価が短期間に集中',
             evidence
@@ -346,33 +469,44 @@
         } else if (!hasPolarizedTimeOverlap) {
           addObservation(observations, 'uncorroborated_time_cluster', '表示レビューに短期間の日付集中がある', `${evidence}（選択表示された標本のため単独では加点しません）`);
         }
-      } else if (!hasPolarizedTimeOverlap && temporalBurst.strength >= 0.25 && directionRatio >= 0.8) {
+      } else if (
+        !hasPolarizedTimeOverlap &&
+        temporalBurst.strength >= 0.225 &&
+        directionLowerBound >= WILSON_THRESHOLDS.directionModerate
+      ) {
         const evidence = `${temporalBurst.windowDays}日以内に${temporalBurst.count}/${temporalBurst.total}件（${temporalBurst.start}〜${temporalBurst.end}）`;
         addObservation(observations, 'uncorroborated_time_cluster', '表示レビューに短期間の日付集中がある', `${evidence}（選択表示された標本のため単独では加点しません）`);
       }
 
-      if (temporalBurst.vineRatio < 0.5 && temporalBurst.strength >= 0.4 && temporalSupport.burstDuplicateRatio >= 0.4 && textClusters.strength >= 0.35) {
-        addSignal(
+      let duplicateCampaignAdded = false;
+      if (temporalBurst.vineRatio < 0.5) {
+        duplicateCampaignAdded = addSignal(
           signals,
           'co_burst_duplicate_campaign',
           'coordination',
-          20,
+          20 *
+            smoothstep(temporalBurst.strength, 0.36, 0.44) *
+            smoothstep(temporalSupport.burstDuplicateLowerBound, 0.135, 0.165) *
+            smoothstep(textClusters.strength, 0.315, 0.385),
           Math.min(reviewQuantityReliability, 0.55 + temporalBurst.strength * 0.45),
           '投稿日集中と本文重複が同じレビュー群で発生',
           `集中期間内の類似本文 ${temporalSupport.burstDuplicateCount}/${temporalBurst.count}件`
         );
-      } else if (
+      }
+      if (
+        !duplicateCampaignAdded &&
         temporalBurst.vineRatio < 0.5 &&
-        temporalBurst.strength >= 0.45 &&
-        temporalBurst.genericRatio >= 0.55 &&
-        directionRatio >= 0.75 &&
         (temporalSupport.directionalUnverifiedSupport || temporalSupport.directionalDistributionSupport)
       ) {
         addSignal(
           signals,
           'co_burst_generic_campaign',
           'coordination',
-          14,
+          14 *
+            Math.max(temporalSupport.unverifiedSupportStrength, temporalSupport.distributionSupportStrength) *
+            smoothstep(temporalBurst.strength, 0.405, 0.495) *
+            smoothstep(temporalBurst.genericLowerBound, 0.315, 0.385) *
+            smoothstep(directionLowerBound, 0.45, 0.55),
           reviewQuantityReliability,
           '投稿日集中・評価方向・汎用本文が同時に偏る',
           `集中期間の汎用本文 ${Math.round(temporalBurst.genericRatio * 100)}%`
