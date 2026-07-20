@@ -6,10 +6,16 @@ Amazon、Amazon.co.jp、Amazon Vine、サクラチェッカーの公式・提携
 
 ## ダウンロード
 
-- [Amazon レビュー注意度メーター v2.0.3 配布用ZIP](https://github.com/AiWithYou/amazon-review-trust-meter/releases/download/v2.0.3/amazon-review-trust-meter-v2.0.3.zip)
-- [SHA-256チェックサム](https://github.com/AiWithYou/amazon-review-trust-meter/releases/download/v2.0.3/SHA256SUMS.txt)
+- [Amazon レビュー注意度メーター v2.0.4 配布用ZIP](https://github.com/AiWithYou/amazon-review-trust-meter/releases/download/v2.0.4/amazon-review-trust-meter-v2.0.4.zip)
+- [SHA-256チェックサム](https://github.com/AiWithYou/amazon-review-trust-meter/releases/download/v2.0.4/SHA256SUMS.txt)
 
-ZIPを展開すると `amazon-review-trust-meter-v2.0.3` フォルダが作成されます。Chromeの「パッケージ化されていない拡張機能を読み込む」から、そのフォルダを選択してください。Chromeウェブストア形式のインストーラーではないため、ZIPのままでは読み込めません。
+ZIPを展開すると `amazon-review-trust-meter-v2.0.4` フォルダが作成されます。Chromeの「パッケージ化されていない拡張機能を読み込む」から、そのフォルダを選択してください。Chromeウェブストア形式のインストーラーではないため、ZIPのままでは読み込めません。
+
+## v2.0.4で変わったこと
+
+- MIT Licenseを追加し、利用・改変・再配布の条件を明確化
+- 配布ZIPに `LICENSE` を同梱
+- 判定ロジックと表示内容はv2.0.3から変更なし
 
 ## v2.0.3で変わったこと
 
@@ -97,7 +103,7 @@ v1系の「怪しい特徴を単純加算し、注意度を★へ線形変換す
 2. Chromeで `chrome://extensions` を開きます。
 3. 「デベロッパー モード」を有効にします。
 4. 「パッケージ化されていない拡張機能を読み込む」を押します。
-5. 展開された `amazon-review-trust-meter-v2.0.3` フォルダを選択します。
+5. 展開された `amazon-review-trust-meter-v2.0.4` フォルダを選択します。
 6. Amazon.co.jpの商品詳細ページを再読み込みします。
 
 開発・テストを行う場合は、ZIPではなくこのリポジトリをクローンしてください。
@@ -117,7 +123,7 @@ npm run package:verify
 
 `npm run check` は判定3ファイルと `content.js` の構文確認後、全テストを実行します。テストには正常な高評価商品、組織的な高評価操作、類似低評価攻撃、Vine発売時集中、投稿日集中のみ、中程度の二極化単独、複合兆候が重なる確認推奨例、欠損データ、日本語の言い換えテンプレートを含みます。
 
-`npm run package` は `manifest.json` のバージョンを使い、実行に必要なファイルとREADMEだけを `dist/amazon-review-trust-meter-v<version>.zip` にまとめ、`dist/SHA256SUMS.txt` を更新します。
+`npm run package` は `manifest.json` のバージョンを使い、実行に必要なファイル、README、LICENSEを `dist/amazon-review-trust-meter-v<version>.zip` にまとめ、`dist/SHA256SUMS.txt` を更新します。
 
 `npm run package:verify` はZIPを展開せず、格納ファイル一覧、各ファイルのSHA-256、格納されたmanifestのバージョン、配布ZIPのチェックサムを検証します。
 
@@ -131,6 +137,7 @@ scoring.js              特徴統合、点数、判定ラベル
 content.js              Amazon DOM抽出、表示、再描画制御
 styles.css              商品ページ内カードの表示
 package.json
+LICENSE                 MIT License
 scripts/package-extension.ps1  配布用ZIPとSHA-256の生成
 scripts/verify-package.ps1     ZIP内容、バージョン、ハッシュの検証
 tests/scoring.test.cjs  パーサー、判定、誤検知抑制の回帰テスト
@@ -147,4 +154,4 @@ dist/                    配布用ZIPとSHA-256チェックサム
 
 ## ライセンス
 
-現時点ではオープンソースライセンスを設定していません。リポジトリを公開しても、コードの再利用・改変・再配布を許諾するものではありません。再利用を認める場合は、目的に合うライセンスを別途追加してください。
+[MIT License](./LICENSE)です。著作権表示とライセンス本文を保持することを条件に、利用・複製・改変・公開・配布・サブライセンス・販売が許可されます。本ソフトウェアは無保証で提供されます。

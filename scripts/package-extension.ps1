@@ -28,7 +28,8 @@ $runtimeFiles = @(
   'scoring.js',
   'content.js',
   'styles.css',
-  'README.md'
+  'README.md',
+  'LICENSE'
 )
 
 try {

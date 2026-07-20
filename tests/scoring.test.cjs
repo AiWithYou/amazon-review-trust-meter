@@ -67,8 +67,10 @@ function polarizedFanReviews() {
 test('manifest・package・構文がv2で整合する', () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
   const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
-  assert.equal(manifest.version, '2.0.3');
+  assert.equal(manifest.version, '2.0.4');
   assert.equal(packageJson.version, manifest.version);
+  assert.equal(packageJson.license, 'MIT');
+  assert.match(fs.readFileSync(path.join(root, 'LICENSE'), 'utf8'), /^MIT License\r?\n/);
   assert.deepEqual(manifest.content_scripts[0].js, ['scoring-base.js', 'scoring-features.js', 'scoring.js', 'content.js']);
   assert.equal(manifest.permissions, undefined);
   assert.equal(manifest.host_permissions, undefined);

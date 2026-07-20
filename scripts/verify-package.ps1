@@ -24,7 +24,8 @@ $runtimeFiles = @(
   'scoring.js',
   'content.js',
   'styles.css',
-  'README.md'
+  'README.md',
+  'LICENSE'
 )
 $expectedEntries = @($runtimeFiles | ForEach-Object { "$artifactName/$($_.Replace('\', '/'))" })
 $strictUtf8 = [System.Text.UTF8Encoding]::new($false, $true)
