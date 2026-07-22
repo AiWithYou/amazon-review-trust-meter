@@ -205,9 +205,9 @@ https://github.com/AiWithYou/amazon-review-trust-meter/blob/main/PRIVACY.md
 
 ## 画像アセット確認表
 
-- ストアアイコン: 128 × 128 px
-- スクリーンショット: 1280 × 800 pxを1〜5枚
-- 小さいプロモーションタイル: 440 × 280 px
+- ストアアイコン: `store-assets/icon-128.png`（128 × 128 px）
+- スクリーンショット: `store-assets/screenshot-01-overview.png`（1280 × 800 px）
+- 小さいプロモーションタイル: `store-assets/promo-small-440x280.png`（440 × 280 px）
 - マーキープロモーションタイル: 1400 × 560 px（任意）
 
 画像は実際の拡張機能画面と一致させ、提供していない機能、利用者の推薦文、誇張した検出率を記載しません。
