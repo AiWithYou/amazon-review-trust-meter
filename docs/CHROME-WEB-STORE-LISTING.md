@@ -205,7 +205,7 @@ https://github.com/AiWithYou/amazon-review-trust-meter/blob/main/PRIVACY.md
 
 ## 画像アセット確認表
 
-- ストアアイコン: `store-assets/icon-128.png`（128 × 128 px）
+- ストアアイコン: `store-assets/icon-128-v2.png`（128 × 128 px）
 - スクリーンショット: `store-assets/screenshot-01-overview.png`（1280 × 800 px）
 - 小さいプロモーションタイル: `store-assets/promo-small-440x280.png`（440 × 280 px）
 - マーキープロモーションタイル: 1400 × 560 px（任意）
