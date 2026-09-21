@@ -21,6 +21,8 @@
   const PRODUCT_PATH = /\/(?:[^/]+\/dp|dp|gp\/product)\/([A-Z0-9]{10})(?:[/?]|$)/i;
   let renderTimer;
   let lastFingerprint = '';
+  let observer;
+  const DATA_SELECTOR = '#acrPopover, #averageCustomerReviews, #acrCustomerReviewText, [data-hook="rating-out-of-text"], [data-hook="total-review-count"], #histogramTable, [data-hook="review-star-filter"], #productTitle, #bylineInfo, #feature-bullets, #productOverview_feature_div, #productDescription, #aplus, #productDetails_techSpec_section_1, #productDetails_detailBullets_sections1, [data-hook="review"], #ask_feature_div, #averageCustomerReviews_feature_div, #title_feature_div, #centerCol';
 
   function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
@@ -85,7 +87,9 @@
     const text = normalizeSpaces(value);
     const japanese = text.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);
     if (japanese) {
-      return `${japanese[1]}-${japanese[2].padStart(2, '0')}-${japanese[3].padStart(2, '0')}`;
+      const iso = `${japanese[1]}-${japanese[2].padStart(2, '0')}-${japanese[3].padStart(2, '0')}`;
+      const timestamp = Date.parse(iso);
+      return Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === iso ? iso : '';
     }
 
     const englishText = text
@@ -98,7 +102,7 @@
   function parseHelpfulVotes(value) {
     const text = normalizeSpaces(value);
     if (!text) return null;
-    if (/一人|1人|one person/i.test(text)) return 1;
+    if (/一人|\bone person\b/i.test(text)) return 1;
     return parseInteger(text);
   }
 
@@ -137,7 +141,7 @@
 
   function getHistogram(doc = document) {
     const distribution = { 1: null, 2: null, 3: null, 4: null, 5: null };
-    const rows = doc.querySelectorAll('#histogramTable tr, #histogramTable a[aria-label], [data-hook="review-star-filter"]');
+    const rows = doc.querySelectorAll('#histogramTable tr, #histogramTable a[aria-label], #histogramTable a[href*="filterByStar"], [data-hook="review-star-filter"]');
 
     for (const row of rows) {
       const labels = [
@@ -159,7 +163,8 @@
       const starNames = { five_star: 5, four_star: 4, three_star: 3, two_star: 2, one_star: 1 };
       const starName = href.match(/filterByStar=([a-z_]+)/i)?.[1];
       const progress = row.querySelector?.('[role="progressbar"]');
-      const percentage = Number(progress?.getAttribute('aria-valuenow'));
+      const rawPercentage = progress?.getAttribute('aria-valuenow');
+      const percentage = rawPercentage === null || rawPercentage === undefined || rawPercentage.trim() === '' ? NaN : Number(rawPercentage);
       if (starNames[starName] && Number.isFinite(percentage)) {
         distribution[starNames[starName]] = clamp(percentage, 0, 100);
       }
@@ -220,7 +225,13 @@
   }
 
   function getReviewSample(doc = document) {
-    return [...doc.querySelectorAll('[data-hook="review"]')].slice(0, 20).map((reviewElement) => {
+    const seen = new Set();
+    return [...doc.querySelectorAll('[data-hook="review"]')].filter((element) => {
+      const id = element.getAttribute('data-review-id') || element.id;
+      if (id && seen.has(id)) return false;
+      if (id) seen.add(id);
+      return true;
+    }).slice(0, 20).map((reviewElement) => {
       const starText = reviewElement.querySelector('[data-hook="review-star-rating"], [data-hook="cmps-review-star-rating"], .review-rating')?.textContent;
       const fullText = normalizeSpaces(reviewElement.textContent);
       const verifiedBadge = reviewElement.querySelector('[data-hook="avp-badge"]');
@@ -228,7 +239,7 @@
       const vine = Boolean(vineBadge) || /Vine(?:先取りプログラム|カスタマーレビュー| Customer Review)/i.test(fullText);
       const helpfulElement = reviewElement.querySelector('[data-hook="helpful-vote-statement"]');
       return {
-        id: reviewElement.id || reviewElement.getAttribute('data-review-id') || '',
+        id: reviewElement.getAttribute('data-review-id') || reviewElement.id || '',
         reviewerId: getReviewerId(reviewElement),
         stars: parseReviewStarText(starText),
         title: getReviewTitle(reviewElement),
@@ -377,7 +388,7 @@
       distribution: data.distribution,
       title: data.title,
       brand: data.brand,
-      detailsLength: data.details.length,
+      details: data.details,
       reviews: data.reviews.map((review) => [
         review.id,
         review.reviewerId,
@@ -388,6 +399,7 @@
         review.variation,
         review.helpfulVotes,
         review.imageCount,
+        review.title,
         review.body
       ])
     });
@@ -429,24 +441,34 @@
   }
 
   function scheduleRender() {
-    window.clearTimeout(renderTimer);
-    renderTimer = window.setTimeout(render, 650);
+    if (renderTimer !== undefined) return;
+    renderTimer = window.setTimeout(() => {
+      renderTimer = undefined;
+      render();
+    }, 200);
+  }
+
+  function isRelevantMutation(mutation) {
+    const element = mutation.target?.nodeType === 1 ? mutation.target : mutation.target?.parentElement;
+    if (element?.closest?.(`#${CARD_ID}`)) return false;
+    const nodes = [...(mutation.addedNodes || []), ...(mutation.removedNodes || [])];
+    if (nodes.length && nodes.every((node) => node.id === CARD_ID)) return !document.getElementById(CARD_ID);
+    // Container changes matter only if an analyzed element was added/removed.
+    if (nodes.some((node) => node.nodeType === 1 && (node.matches?.(DATA_SELECTOR) || node.querySelector?.(DATA_SELECTOR) || node.querySelector?.(`#${CARD_ID}`)))) return true;
+    const dataElement = element?.closest?.(DATA_SELECTOR);
+    return Boolean(dataElement && !['centerCol', 'title_feature_div', 'averageCustomerReviews_feature_div', 'ask_feature_div'].includes(dataElement.id));
   }
 
   function start() {
     if (typeof document === 'undefined' || typeof window === 'undefined') return;
+    if (observer) return;
     scheduleRender();
-    new MutationObserver((mutations) => {
-      const changedByPage = mutations.some((mutation) => {
-        if (mutation.target?.closest?.(`#${CARD_ID}`)) return false;
-        return [...mutation.addedNodes, ...mutation.removedNodes].some((node) => {
-          if (node.nodeType !== Node.ELEMENT_NODE) return false;
-          if (node.id === CARD_ID || node.closest?.(`#${CARD_ID}`) || node.querySelector?.(`#${CARD_ID}`)) return false;
-          return true;
-        });
-      });
-      if (changedByPage) scheduleRender();
-    }).observe(document.documentElement, { childList: true, subtree: true });
+    observer = new MutationObserver((mutations) => {
+      if (mutations.some(isRelevantMutation)) scheduleRender();
+    });
+    observer.observe(document.documentElement, { childList: true, characterData: true, attributes: true, attributeFilter: ['title', 'aria-label', 'aria-valuenow', 'data-review-id'], subtree: true });
+    window.addEventListener('popstate', scheduleRender);
+    window.addEventListener('pageshow', scheduleRender);
   }
 
   return {
@@ -456,6 +478,7 @@
     getAsin,
     getReviewBody,
     getReviewTitle,
+    isRelevantMutation,
     parseAverageRatingText,
     parseHistogramLabel,
     parseHelpfulVotes,

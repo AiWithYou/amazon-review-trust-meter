@@ -106,7 +106,8 @@
   function distributionInfo(distribution) {
     const values = {};
     for (const star of STARS) {
-      const value = Number(distribution?.[star]);
+      const raw = distribution?.[star];
+      const value = raw === null || raw === undefined || typeof raw === 'boolean' || String(raw).trim() === '' ? NaN : Number(raw);
       if (!Number.isFinite(value) || value < 0 || value > 100) {
         return { valid: false, usable: false, sum: null, values: null, normalized: null };
       }
@@ -178,9 +179,9 @@
 
   function collectClaimConflicts(title, details) {
     const definitions = [
-      { label: '連続時間', weight: 18, pattern: /(\d+(?:\.\d+)?)\s*時間/gi },
+      { label: '連続時間', weight: 18, pattern: /(\d+(?:\.\d+)?)\s*時間\s*(?:の)?(?:連続(?:再生|使用|運転)?|再生|持続使用)/gi },
       { label: '防水・防塵等級', weight: 28, pattern: /\b(IP(?:X\d|\d{2}))\b/gi },
-      { label: '電池容量', weight: 18, pattern: /(\d{3,6}(?:,\d{3})?)\s*mAh/gi },
+      { label: '電池容量', weight: 18, pattern: /\b(\d{1,3}(?:,\d{3})+|\d{3,6})\s*mAh/gi },
       { label: '発光パターン数', weight: 12, pattern: /(\d+)\s*種類(?:の)?(?:発光|ライト|点灯)(?:パターン|モード|色)?/gi }
     ];
     const conflicts = [];
@@ -259,10 +260,24 @@
   }
 
   function getReviewTextSimilarity(leftValue, rightValue) {
-    const left = normalizeReviewBody(leftValue);
-    const right = normalizeReviewBody(rightValue);
-    const leftLength = charLength(left);
-    const rightLength = charLength(right);
+    return comparePreparedText(prepareReviewText(leftValue), prepareReviewText(rightValue));
+  }
+
+  function prepareReviewText(value) {
+    const text = normalizeReviewBody(value);
+    return { text, length: charLength(text), shingles: new Map() };
+  }
+
+  function preparedShingles(item, size) {
+    if (!item.shingles.has(size)) item.shingles.set(size, getShingles(item.text, size));
+    return item.shingles.get(size);
+  }
+
+  function comparePreparedText(leftItem, rightItem) {
+    const left = leftItem.text;
+    const right = rightItem.text;
+    const leftLength = leftItem.length;
+    const rightLength = rightItem.length;
     const minimumLength = Math.min(leftLength, rightLength);
     const maximumLength = Math.max(leftLength, rightLength);
     if (minimumLength < 18 || maximumLength === 0) return 0;
@@ -272,8 +287,8 @@
       ? minimumLength / maximumLength
       : 0;
     const shingleSize = minimumLength < 42 ? 2 : 3;
-    const leftSet = getShingles(left, shingleSize);
-    const rightSet = getShingles(right, shingleSize);
+    const leftSet = preparedShingles(leftItem, shingleSize);
+    const rightSet = preparedShingles(rightItem, shingleSize);
     let intersection = 0;
     for (const item of leftSet) if (rightSet.has(item)) intersection += 1;
     const union = leftSet.size + rightSet.size - intersection;
@@ -322,6 +337,7 @@
       .map((review, index) => ({
         index,
         body: review.body || '',
+        prepared: prepareReviewText(review.body),
         length: charLength(normalizeReviewBody(review.body)),
         genericness: getGenericness(review.body)
       }))
@@ -335,7 +351,7 @@
       for (let right = left + 1; right < eligible.length; right += 1) {
         const leftItem = eligible[left];
         const rightItem = eligible[right];
-        const similarity = getReviewTextSimilarity(leftItem.body, rightItem.body);
+        const similarity = comparePreparedText(leftItem.prepared, rightItem.prepared);
         const threshold = getSimilarityThreshold(Math.min(leftItem.length, rightItem.length));
         if (similarity >= threshold) {
           unionFind.union(leftItem.index, rightItem.index);

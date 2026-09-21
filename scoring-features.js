@@ -94,7 +94,7 @@
       return stars.length ? stars.reduce((sum, value) => sum + value, 0) / stars.length : null;
     };
     const highRatio = safeDivide(members.filter((review) => Number(review.stars) >= 4).length, members.length, 0);
-    const lowRatio = safeDivide(members.filter((review) => Number(review.stars) <= 2).length, members.length, 0);
+    const lowRatio = safeDivide(members.filter((review) => (Number.isFinite(review.stars) && review.stars >= 1 && review.stars <= 2)).length, members.length, 0);
     const vineRatio = safeDivide(members.filter((review) => review.vine === true).length, members.length, 0);
     const genericCount = members.filter((review) => getGenericness(review.body) >= 0.68).length;
     const genericRatio = safeDivide(genericCount, members.length, 0);
@@ -109,7 +109,7 @@
       genericRatio,
       genericLowerBound: wilsonLowerBound(genericCount, members.length),
       highLowerBound: wilsonLowerBound(members.filter((review) => Number(review.stars) >= 4).length, members.length),
-      lowLowerBound: wilsonLowerBound(members.filter((review) => Number(review.stars) <= 2).length, members.length),
+      lowLowerBound: wilsonLowerBound(members.filter((review) => (Number.isFinite(review.stars) && review.stars >= 1 && review.stars <= 2)).length, members.length),
       burstMean,
       outsideMean,
       ratingShift: Number.isFinite(burstMean) && Number.isFinite(outsideMean) ? Math.abs(burstMean - outsideMean) : null
@@ -139,7 +139,7 @@
 
   function getReviewDirection(review) {
     if (Number(review.stars) >= 4) return 'positive';
-    if (Number(review.stars) <= 2) return 'negative';
+    if ((Number.isFinite(review.stars) && review.stars >= 1 && review.stars <= 2)) return 'negative';
     return 'neutral';
   }
 
@@ -201,7 +201,8 @@
 
   function computeAdjustedRating({ averageRating, distribution, reviews, reviewAnalysis, confidence }) {
     const info = distributionInfo(distribution);
-    if (!info.usable || reviews.length < 6 || confidence < 35) return null;
+    const sampleStars = reviews.map((review) => review.stars).filter((star) => Number.isFinite(star) && star >= 1 && star <= 5);
+    if (!info.usable || sampleStars.length < 6 || confidence < 35) return null;
 
     const baseHistogramRating = getWeightedRating(distribution);
     const baseRating = Number.isFinite(averageRating) ? averageRating : baseHistogramRating;
@@ -219,7 +220,6 @@
       bucketRisk[star] = (priorStrength * fallbackPrior + riskSum) / (priorStrength + matching.length);
     }
 
-    const sampleStars = reviews.map((review) => Number(review.stars)).filter(Number.isFinite);
     const sampleMean = sampleStars.length ? sampleStars.reduce((sum, value) => sum + value, 0) / sampleStars.length : baseRating;
     const distinctStars = new Set(sampleStars.map((value) => Math.round(value))).size;
     const selectionFactor = clamp(1 - Math.abs(sampleMean - baseRating) / 2.5, 0.35, 1);

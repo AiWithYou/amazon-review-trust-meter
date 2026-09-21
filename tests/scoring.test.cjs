@@ -69,7 +69,7 @@ function polarizedFanReviews() {
 test('manifest・package・構文がv2で整合する', () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
   const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
-  assert.equal(manifest.version, '2.1.0');
+  assert.equal(manifest.version, '2.2.0');
   assert.equal(packageJson.version, manifest.version);
   assert.equal(packageJson.license, 'MIT');
   assert.match(fs.readFileSync(path.join(root, 'LICENSE'), 'utf8'), /^MIT License\r?\n/);

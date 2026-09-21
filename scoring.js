@@ -79,17 +79,25 @@
   }
 
   function analyzeProduct(input = {}) {
-    const averageRating = Number.isFinite(input.averageRating) ? input.averageRating : null;
-    const reviewCount = Number.isFinite(input.reviewCount) ? input.reviewCount : null;
+    const averageRating = Number.isFinite(input.averageRating) && input.averageRating >= 1 && input.averageRating <= 5 ? input.averageRating : null;
+    const reviewCount = Number.isInteger(input.reviewCount) && input.reviewCount >= 0 ? input.reviewCount : null;
     const distribution = input.distribution || {};
     const title = normalizeSpaces(input.title);
     const brand = normalizeSpaces(input.brand);
     const details = normalizeSpaces(input.details);
+    const seenReviewIds = new Set();
     const reviews = (Array.isArray(input.reviews) ? input.reviews : [])
+      .filter((review) => {
+        if (!review || typeof review !== 'object') return false;
+        const id = normalizeSpaces(review.id);
+        if (id && seenReviewIds.has(id)) return false;
+        if (id) seenReviewIds.add(id);
+        return true;
+      })
       .slice(0, 24)
       .map((review) => ({
         ...review,
-        stars: Number.isFinite(Number(review.stars)) ? Number(review.stars) : null,
+        stars: typeof review.stars !== 'boolean' && Number(review.stars) >= 1 && Number(review.stars) <= 5 ? Number(review.stars) : null,
         body: normalizeSpaces(review.body),
         title: normalizeSpaces(review.title),
         date: normalizeSpaces(review.date),
@@ -190,26 +198,12 @@
       const weightedRating = getWeightedRating(distribution);
       const mismatch = Number.isFinite(averageRating) ? Math.abs(weightedRating - averageRating) : 0;
       if (mismatch >= 0.24) {
-        const mismatchRamp = smoothstep(mismatch, 0.315, 0.385);
-        const reliabilityRamp = smoothstep(countReliability, 0.65, 0.8);
-        const mismatchPoints = mismatchRamp * (7 + 3 * smoothstep(mismatch, 0.405, 0.495));
-        const added = addSignal(
-          signals,
-          'rating_mismatch',
-          'distribution',
-          mismatchPoints,
-          countReliability * reliabilityRamp,
-          '平均評価と星別分布が整合しにくい',
-          `表示 ${averageRating.toFixed(1)} / 分布換算 ${weightedRating.toFixed(1)}`
+        addObservation(
+          observations,
+          'rating_mismatch_observation',
+          '表示平均と星別分布の単純平均に差がある',
+          `表示 ${averageRating.toFixed(1)} / 分布換算 ${weightedRating.toFixed(1)}（Amazonの重み付け平均を考慮し加点しません）`
         );
-        if (!added) {
-          addObservation(
-            observations,
-            'rating_mismatch_observation',
-            '表示平均と星別分布の単純平均に差がある',
-            `表示 ${averageRating.toFixed(1)} / 分布換算 ${weightedRating.toFixed(1)}（Amazonの重み付け平均を考慮し単独では加点しません）`
-          );
-        }
       }
 
       if (!distributionData.valid) {
@@ -222,7 +216,7 @@
     const textClusters = findTextClusters(reviews);
     const temporalBurst = findTemporalBurst(reviews);
     const rawPositiveReviews = reviews.filter((review) => Number(review.stars) >= 4);
-    const rawNegativeReviews = reviews.filter((review) => Number(review.stars) <= 2);
+    const rawNegativeReviews = reviews.filter((review) => (Number.isFinite(review.stars) && review.stars >= 1 && review.stars <= 2));
     const rawNonVinePositive = rawPositiveReviews.filter((review) => review.vine !== true);
     const rawNonVineNegative = rawNegativeReviews.filter((review) => review.vine !== true);
     const positiveUnverifiedCount = rawNonVinePositive.filter((review) => review.verified === false).length;
@@ -386,7 +380,7 @@
     const ratingBodyMismatch = reviews.filter((review) => {
       const body = String(review.body || '');
       return (Number(review.stars) >= 4 && NEGATIVE_PATTERN.test(body) && !POSITIVE_PATTERN.test(body)) ||
-        (Number(review.stars) <= 2 && POSITIVE_PATTERN.test(body) && !NEGATIVE_PATTERN.test(body));
+        ((Number.isFinite(review.stars) && review.stars >= 1 && review.stars <= 2) && POSITIVE_PATTERN.test(body) && !NEGATIVE_PATTERN.test(body));
     });
     if (reviews.length >= 8 && ratingBodyMismatch.length / reviews.length >= 0.3) {
       addSignal(signals, 'rating_body_mismatch', 'text', 7, reviewQuantityReliability * 0.75, '星評価と本文の方向が一致しないレビューが多い', `${ratingBodyMismatch.length}/${reviews.length}件`);
@@ -564,7 +558,11 @@
     if (reviews.length < 6) reviewRiskScore = Math.min(reviewRiskScore, 45);
     const score = Math.round(clamp(reviewRiskScore + listingRiskScore, 0, 100));
 
-    const sufficient = confidenceInfo.value >= 35 && Number.isFinite(averageRating) && (distributionData.usable || reviews.length >= 6);
+    // A complete histogram must not make one selected review look sufficient.
+    const sufficient = confidenceInfo.value >= 35 && Number.isFinite(averageRating) && confidenceInfo.textCount >= 6 && (distributionData.usable || reviews.length >= 6);
+    if (confidenceInfo.textCount < 6) {
+      addObservation(observations, 'insufficient_review_text', '本文の判定材料が不足', `分析可能な本文 ${confidenceInfo.textCount}件 / 最低6件。商品記載の注意点は別途確認してください。`);
+    }
     const adjusted = computeAdjustedRating({
       averageRating,
       distribution,

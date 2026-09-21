@@ -11,16 +11,16 @@ Chromeウェブストアでは配布していないため、ZIPを展開してCh
 
 ### 1. 配布用ZIPをダウンロード
 
-- [Amazon レビュー注意度メーター v2.1.0 配布用ZIPをダウンロード](https://github.com/AiWithYou/amazon-review-trust-meter/releases/download/v2.1.0/amazon-review-trust-meter-v2.1.0.zip)
-- [SHA-256チェックサムを確認](https://github.com/AiWithYou/amazon-review-trust-meter/releases/download/v2.1.0/SHA256SUMS.txt)
-- [v2.1.0のReleaseページを見る](https://github.com/AiWithYou/amazon-review-trust-meter/releases/tag/v2.1.0)
+- [Amazon レビュー注意度メーター v2.2.0 配布用ZIPをダウンロード](https://github.com/AiWithYou/amazon-review-trust-meter/releases/download/v2.2.0/amazon-review-trust-meter-v2.2.0.zip)
+- [SHA-256チェックサムを確認](https://github.com/AiWithYou/amazon-review-trust-meter/releases/download/v2.2.0/SHA256SUMS.txt)
+- [v2.2.0の監査・変更記録を見る](./docs/AUDIT-2026-09-21.md)
 
 ZIPのままではChromeへ読み込めません。ダウンロード後、WindowsでZIPを右クリックして「すべて展開」を選びます。
 
 展開後は、次のように `manifest.json` が入っているフォルダを使います。
 
 ```text
-amazon-review-trust-meter-v2.1.0/
+amazon-review-trust-meter-v2.2.0/
 ├── manifest.json
 ├── content.js
 ├── scoring.js
@@ -33,7 +33,7 @@ amazon-review-trust-meter-v2.1.0/
 1. Chromeのアドレスバーに `chrome://extensions` と入力して開きます。
 2. 画面右上の「デベロッパー モード」をオンにします。
 3. 画面左上の「パッケージ化されていない拡張機能を読み込む」を押します。
-4. 展開した `amazon-review-trust-meter-v2.1.0` フォルダを選びます。
+4. 展開した `amazon-review-trust-meter-v2.2.0` フォルダを選びます。
 5. 拡張機能一覧に「Amazon レビュー注意度メーター」が表示されればインストール完了です。
 
 フォルダを選ぶ画面では、`manifest.json` が直接入っているフォルダを選んでください。ZIPファイルや、その一つ外側のフォルダを選ぶと読み込めません。
@@ -92,18 +92,18 @@ Amazon側のページ構造変更や、商品ページの一部レイアウト�
 
 ### 新しいバージョンへ更新
 
-1. 新しい配布用ZIPをダウンロードして展開します。
-2. `chrome://extensions` を開きます。
-3. 既存の「Amazon レビュー注意度メーター」を削除します。
-4. 「パッケージ化されていない拡張機能を読み込む」から、新しいフォルダを選びます。
-5. Amazonの商品ページを再読み込みします。
+1. 現在Chromeに読み込んでいるフォルダのファイルを、新しいZIP内のファイルで上書きします。このリポジトリを直接読み込んでいる場合は不要です。
+2. `chrome://extensions` を開き、対象拡張の再読み込みボタンを押します。
+3. バージョンが `2.2.0` になったことを確認し、Amazonの商品ページも再読み込みします。
+
+読み込み元が分からない場合は、対象拡張の「詳細」で確認できます。別フォルダへ移す場合は旧版を削除してから新しいフォルダを読み込みます。
 
 この拡張機能は設定やアカウント情報を保存しないため、削除して読み込み直しても引き継ぎ作業はありません。
 
 ### アンインストール
 
 1. `chrome://extensions` で「Amazon レビュー注意度メーター」の「削除」を押します。
-2. 展開した `amazon-review-trust-meter-v2.1.0` フォルダが不要なら、通常のファイルと同じように削除します。
+2. 展開した `amazon-review-trust-meter-v2.2.0` フォルダが不要なら、通常のファイルと同じように削除します。
 
 ## 判定の仕組み
 
@@ -148,7 +148,16 @@ AIや外部AI APIによる判定ではありません。ブラウザ内のルー
 
 ## 現在のバージョン
 
-最新版は[v2.1.0](https://github.com/AiWithYou/amazon-review-trust-meter/releases/tag/v2.1.0)です。
+最新版は[v2.2.0](https://github.com/AiWithYou/amazon-review-trust-meter/releases/tag/v2.2.0)です。
+
+- 欠損した星・割合を0と誤認せず、レビューIDの重複を除外
+- Amazonの重み付き平均との差を注意度へ加点しない
+- 本文6件未満は「判定材料不足」、有効な星6件未満は補正評価を出さない
+- 充電時間と連続時間の混同、参考票11人の誤読、桁区切り容量を修正
+- 同じ長さの説明変更・文字更新・属性更新を検出し、無関係なDOM変更の再解析を削減
+- 本文類似比較をキャッシュ化。3条件の比較で約5.9〜7.6倍（結果同一、処理単体）
+
+以下はv2.1で導入済みの改善です。
 
 - 発売直後の自然なレビュー集中を減衰し、複数窓走査による偶然の集中を抑制
 - 小標本の比率判定を95% Wilson下限へ変更し、短文レビューの類似判定を厳格化
@@ -163,15 +172,18 @@ AIや外部AI APIによる判定ではありません。ブラウザ内のルー
 
 - Node.js 18以上
 - PowerShell 7
-- 外部npmパッケージへの依存なし
+- 拡張本体の外部依存なし。開発テストのみjsdomを使用（`npm ci`）
 
 開発する場合は配布ZIPではなく、このリポジトリをクローンしてください。
 
 ```powershell
+npm ci
 npm test
 npm run check
 npm run package
 npm run package:verify
+npm run benchmark
+# 表示確認: npm run preview
 ```
 
 - `npm run check`：判定ファイルと `content.js` の構文確認後、回帰テストを実行
@@ -208,3 +220,9 @@ dist/                               配布ZIPとSHA-256チェックサム
 ## ライセンス
 
 [MIT License](./LICENSE)です。著作権表示とライセンス本文を保持することを条件に、利用・複製・改変・公開・配布・サブライセンス・販売が許可されます。本ソフトウェアは無保証で提供されます。
+
+## Chromeウェブストアへ更新を提出する場合
+
+[ストア提出用ZIP](https://github.com/AiWithYou/amazon-review-trust-meter/releases/download/v2.2.0/amazon-review-trust-meter-v2.2.0-chrome-web-store.zip)は、manifest.jsonがZIP直下に入っています。既存アイテムの「パッケージ」から「新しいパッケージをアップロード」を選び、このZIPを提出してください。通常はCRX不要です。「Verified CRX Uploads」が有効なアイテムだけは、登録済み秘密鍵によるCRX署名が必要です。[Chrome公式更新手順](https://developer.chrome.com/docs/webstore/update)
+
+GitHub Release公開とChromeウェブストア審査・公開は別です。ストアへの提出・公開状態はダッシュボードで確認してください。

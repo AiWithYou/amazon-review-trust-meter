@@ -1,7 +1,7 @@
 # Chrome Web Store 掲載情報
 
-最終更新日: 2026年7月22日
-対象バージョン: 2.1.0
+最終更新日: 2026年9月21日
+対象バージョン: 2.2.0
 
 Chrome Web Store開発者ダッシュボードへ入力する正本です。実装、README、プライバシーポリシーと矛盾しない内容を維持します。
 
@@ -211,3 +211,9 @@ https://github.com/AiWithYou/amazon-review-trust-meter/blob/main/PRIVACY.md
 - マーキープロモーションタイル: 1400 × 560 px（任意）
 
 画像は実際の拡張機能画面と一致させ、提供していない機能、利用者の推薦文、誇張した検出率を記載しません。
+
+## v2.2.0の更新提出
+
+提出ファイル: `dist/amazon-review-trust-meter-v2.2.0-chrome-web-store.zip`。manifest.jsonはZIP直下、既存の128pxアイコンも同梱します。新規アイテムを作らず、既存アイテムのパッケージを更新してください。通常はZIP、Verified CRX Uploadsが有効なら登録済み秘密鍵で署名したCRXが必要です。
+
+GitHub Releaseの公開だけではストアの既存利用者へ自動更新されません。ダッシュボードでZIPをアップロードし、審査へ提出してください。

@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param()
+param([switch]$Store)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -14,6 +14,7 @@ if ($version -notmatch '^\d+\.\d+\.\d+$') {
 }
 
 $artifactName = "amazon-review-trust-meter-v$version"
+if ($Store) { $artifactName += '-chrome-web-store' }
 $distDir = Join-Path $repoRoot 'dist'
 $zipPath = Join-Path $distDir "$artifactName.zip"
 $checksumPath = Join-Path $distDir 'SHA256SUMS.txt'
@@ -28,7 +29,11 @@ $runtimeFiles = @(
   'scoring.js',
   'content.js',
   'styles.css',
+  'store-assets/icon-128-v2.png',
   'README.md',
+  'PRIVACY.md',
+  'docs/ALGORITHM.md',
+  'docs/AUDIT-2026-09-21.md',
   'LICENSE'
 )
 
@@ -41,17 +46,27 @@ try {
     if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
       throw "Required package file is missing: $relativePath"
     }
-    Copy-Item -LiteralPath $sourcePath -Destination (Join-Path $packageRoot $relativePath)
+    $destinationPath = Join-Path $packageRoot $relativePath
+    New-Item -ItemType Directory -Path (Split-Path -Parent $destinationPath) -Force | Out-Null
+    Copy-Item -LiteralPath $sourcePath -Destination $destinationPath
   }
 
   if (Test-Path -LiteralPath $zipPath) {
     Remove-Item -LiteralPath $zipPath -Force
   }
 
-  Compress-Archive -LiteralPath $packageRoot -DestinationPath $zipPath -CompressionLevel Optimal
+  if ($Store) {
+    Compress-Archive -Path (Join-Path $packageRoot '*') -DestinationPath $zipPath -CompressionLevel Optimal
+  } else {
+    Compress-Archive -LiteralPath $packageRoot -DestinationPath $zipPath -CompressionLevel Optimal
+  }
 
   $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $zipPath).Hash.ToLowerInvariant()
-  $checksumText = "$hash  $artifactName.zip`n"
+  $checksumLines = @()
+  if (Test-Path -LiteralPath $checksumPath) {
+    $checksumLines = @(Get-Content -LiteralPath $checksumPath | Where-Object { $_ -match "  amazon-review-trust-meter-v$([regex]::Escape($version))(?:-chrome-web-store)?\.zip$" -and $_ -notlike "*  $artifactName.zip" })
+  }
+  $checksumText = (($checksumLines + "$hash  $artifactName.zip" | Sort-Object) -join "`n") + "`n"
   [System.IO.File]::WriteAllText($checksumPath, $checksumText, [System.Text.UTF8Encoding]::new($false))
 
   Write-Output "Created: $zipPath"

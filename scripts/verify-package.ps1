@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-  [string]$ZipPath
+  [string]$ZipPath,
+  [switch]$Store
 )
 
 Set-StrictMode -Version Latest
@@ -11,6 +12,8 @@ $manifestPath = Join-Path $repoRoot 'manifest.json'
 $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
 $version = [string]$manifest.version
 $artifactName = "amazon-review-trust-meter-v$version"
+if ($Store) { $artifactName += '-chrome-web-store' }
+$entryPrefix = if ($Store) { '' } else { "$artifactName/" }
 
 if (-not $ZipPath) {
   $ZipPath = Join-Path $repoRoot "dist\$artifactName.zip"
@@ -24,10 +27,14 @@ $runtimeFiles = @(
   'scoring.js',
   'content.js',
   'styles.css',
+  'store-assets/icon-128-v2.png',
   'README.md',
+  'PRIVACY.md',
+  'docs/ALGORITHM.md',
+  'docs/AUDIT-2026-09-21.md',
   'LICENSE'
 )
-$expectedEntries = @($runtimeFiles | ForEach-Object { "$artifactName/$($_.Replace('\', '/'))" })
+$expectedEntries = @($runtimeFiles | ForEach-Object { "$entryPrefix$($_.Replace('\', '/'))" })
 $strictUtf8 = [System.Text.UTF8Encoding]::new($false, $true)
 
 function Get-NormalizedTextBytes {
@@ -52,7 +59,7 @@ try {
   }
 
   foreach ($relativePath in $runtimeFiles) {
-    $entryName = "$artifactName/$($relativePath.Replace('\', '/'))"
+    $entryName = "$entryPrefix$($relativePath.Replace('\', '/'))"
     $entry = $archive.GetEntry($entryName)
     if ($null -eq $entry) {
       throw "ZIP entry is missing: $entryName"
@@ -73,12 +80,12 @@ try {
     # Git may rewrite text line endings during a Windows checkout. Compare the
     # UTF-8 contents after newline normalization while still rejecting invalid
     # UTF-8, BOM changes, missing files, extra files, and other content changes.
-    $sourceHash = [System.Convert]::ToHexString(
-      [System.Security.Cryptography.SHA256]::HashData((Get-NormalizedTextBytes -Bytes $sourceBytes))
-    )
-    $packagedHash = [System.Convert]::ToHexString(
-      [System.Security.Cryptography.SHA256]::HashData((Get-NormalizedTextBytes -Bytes $packagedBytes))
-    )
+    if (-not $relativePath.EndsWith('.png')) {
+      $sourceBytes = Get-NormalizedTextBytes -Bytes $sourceBytes
+      $packagedBytes = Get-NormalizedTextBytes -Bytes $packagedBytes
+    }
+    $sourceHash = [System.Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($sourceBytes))
+    $packagedHash = [System.Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($packagedBytes))
     if ($sourceHash -ne $packagedHash) {
       throw "Packaged file does not match the source: $relativePath"
     }
@@ -97,9 +104,9 @@ finally {
 
 $actualZipHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $resolvedZipPath).Hash.ToLowerInvariant()
 $checksumPath = Join-Path $repoRoot 'dist\SHA256SUMS.txt'
-$checksumLine = (Get-Content -Raw -LiteralPath $checksumPath).Trim()
+$checksumLines = @(Get-Content -LiteralPath $checksumPath | Where-Object { $_ -like "*  $artifactName.zip" })
 $expectedChecksumLine = "$actualZipHash  $artifactName.zip"
-if ($checksumLine -ne $expectedChecksumLine) {
+if ($checksumLines.Count -ne 1 -or $checksumLines[0] -ne $expectedChecksumLine) {
   throw 'SHA256SUMS.txt does not match the ZIP.'
 }
 
