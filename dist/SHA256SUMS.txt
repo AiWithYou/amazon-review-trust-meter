@@ -1,2 +1,2 @@
-0d4c1615533bff80008e66cc38f3515c1b4db4b3016a4bf940d878a3b4428210  amazon-review-trust-meter-v2.2.0.zip
-9ea59e9fe6b4effeb40455a8007fea79aa85126d98eb2dc0bf3fd34ba7e4559e  amazon-review-trust-meter-v2.2.0-chrome-web-store.zip
+91f841d30efea9873687a415bc60b933c63c50f1f359485609609c3d50fa49e6  amazon-review-trust-meter-v2.2.1.zip
+ddfec6806bb6d7a982e434c542864dd9ed9db9ce4d1356e81210fc07a2882bbb  amazon-review-trust-meter-v2.2.1-chrome-web-store.zip

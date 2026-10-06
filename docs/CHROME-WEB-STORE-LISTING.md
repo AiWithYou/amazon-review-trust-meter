@@ -1,7 +1,7 @@
 # Chrome Web Store 掲載情報
 
-最終更新日: 2026年9月21日
-対象バージョン: 2.2.0
+最終更新日: 2026年10月6日
+対象バージョン: 2.2.1
 
 Chrome Web Store開発者ダッシュボードへ入力する正本です。実装、README、プライバシーポリシーと矛盾しない内容を維持します。
 
@@ -206,14 +206,19 @@ https://github.com/AiWithYou/amazon-review-trust-meter/blob/main/PRIVACY.md
 ## 画像アセット確認表
 
 - ストアアイコン: `store-assets/icon-128-v2.png`（128 × 128 px）
-- スクリーンショット: `store-assets/screenshot-01-overview.png`（1280 × 800 px）
+- スクリーンショット1: `store-assets/screenshot-01-overview.png`（1280 × 800 px、一致する記載のコンパクト表示）
+- スクリーンショット2: `store-assets/screenshot-02-details.png`（1280 × 800 px、仕様矛盾の判定根拠）
 - 小さいプロモーションタイル: `store-assets/promo-small-440x280.png`（440 × 280 px）
 - マーキープロモーションタイル: 1400 × 560 px（任意）
 
 画像は実際の拡張機能画面と一致させ、提供していない機能、利用者の推薦文、誇張した検出率を記載しません。
 
-## v2.2.0の更新提出
+## v2.2.1の更新提出
 
-提出ファイル: `dist/amazon-review-trust-meter-v2.2.0-chrome-web-store.zip`。manifest.jsonはZIP直下、既存の128pxアイコンも同梱します。新規アイテムを作らず、既存アイテムのパッケージを更新してください。通常はZIP、Verified CRX Uploadsが有効なら登録済み秘密鍵で署名したCRXが必要です。
+提出ファイル: `dist/amazon-review-trust-meter-v2.2.1-chrome-web-store.zip`。manifest.jsonはZIP直下、既存の128pxアイコンも同梱します。既存アイテムがある場合はそのパッケージを更新してください。初回の場合は「新しいアイテム」からこのZIPをアップロードします。通常はZIP、Verified CRX Uploadsが有効な既存アイテムでは登録済み秘密鍵で署名したCRXが必要です。
 
 GitHub Releaseの公開だけではストアの既存利用者へ自動更新されません。ダッシュボードでZIPをアップロードし、審査へ提出してください。
+
+具体的なアップロード順とファイルの対応は[提出準備ガイド](./CHROME-WEB-STORE-SUBMISSION.md)を参照してください。スクリーンショットはv2.2.1の拡張コードが描画したサンプルデータの表示例です。
+
+公式資料確認日: 2026年10月6日。[画像要件](https://developer.chrome.com/docs/webstore/images)、[既存アイテムの更新](https://developer.chrome.com/docs/webstore/update?hl=en)、[初回公開](https://developer.chrome.com/docs/webstore/publish)、[ローカル処理を含むデータ申告](https://developer.chrome.com/docs/webstore/program-policies/user-data-faq)。

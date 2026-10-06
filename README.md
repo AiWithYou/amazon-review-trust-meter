@@ -7,20 +7,20 @@ Amazon.co.jpの商品ページにある評価分布・レビュー本文・投�
 
 ## まずインストール
 
-Chromeウェブストアでは配布していないため、ZIPを展開してChromeへ読み込みます。初回だけ「デベロッパー モード」を使用します。
+GitHubの配布用ZIPを展開してChromeへ読み込めます。初回だけ「デベロッパー モード」を使用します。Chromeウェブストアへの提出手順と必要資料は[提出準備ガイド](./docs/CHROME-WEB-STORE-SUBMISSION.md)にまとめています。
 
 ### 1. 配布用ZIPをダウンロード
 
-- [Amazon レビュー注意度メーター v2.2.0 配布用ZIPをダウンロード](https://github.com/AiWithYou/amazon-review-trust-meter/releases/download/v2.2.0/amazon-review-trust-meter-v2.2.0.zip)
-- [SHA-256チェックサムを確認](https://github.com/AiWithYou/amazon-review-trust-meter/releases/download/v2.2.0/SHA256SUMS.txt)
-- [v2.2.0の監査・変更記録を見る](./docs/AUDIT-2026-09-21.md)
+- [Amazon レビュー注意度メーター v2.2.1 配布用ZIPをダウンロード](https://github.com/AiWithYou/amazon-review-trust-meter/releases/download/v2.2.1/amazon-review-trust-meter-v2.2.1.zip)
+- [SHA-256チェックサムを確認](https://github.com/AiWithYou/amazon-review-trust-meter/releases/download/v2.2.1/SHA256SUMS.txt)
+- [v2.2.1の監査・変更記録を見る](./docs/AUDIT-2026-10-06.md)
 
 ZIPのままではChromeへ読み込めません。ダウンロード後、WindowsでZIPを右クリックして「すべて展開」を選びます。
 
 展開後は、次のように `manifest.json` が入っているフォルダを使います。
 
 ```text
-amazon-review-trust-meter-v2.2.0/
+amazon-review-trust-meter-v2.2.1/
 ├── manifest.json
 ├── content.js
 ├── scoring.js
@@ -33,7 +33,7 @@ amazon-review-trust-meter-v2.2.0/
 1. Chromeのアドレスバーに `chrome://extensions` と入力して開きます。
 2. 画面右上の「デベロッパー モード」をオンにします。
 3. 画面左上の「パッケージ化されていない拡張機能を読み込む」を押します。
-4. 展開した `amazon-review-trust-meter-v2.2.0` フォルダを選びます。
+4. 展開した `amazon-review-trust-meter-v2.2.1` フォルダを選びます。
 5. 拡張機能一覧に「Amazon レビュー注意度メーター」が表示されればインストール完了です。
 
 フォルダを選ぶ画面では、`manifest.json` が直接入っているフォルダを選んでください。ZIPファイルや、その一つ外側のフォルダを選ぶと読み込めません。
@@ -94,7 +94,7 @@ Amazon側のページ構造変更や、商品ページの一部レイアウト�
 
 1. 現在Chromeに読み込んでいるフォルダのファイルを、新しいZIP内のファイルで上書きします。このリポジトリを直接読み込んでいる場合は不要です。
 2. `chrome://extensions` を開き、対象拡張の再読み込みボタンを押します。
-3. バージョンが `2.2.0` になったことを確認し、Amazonの商品ページも再読み込みします。
+3. バージョンが `2.2.1` になったことを確認し、Amazonの商品ページも再読み込みします。
 
 読み込み元が分からない場合は、対象拡張の「詳細」で確認できます。別フォルダへ移す場合は旧版を削除してから新しいフォルダを読み込みます。
 
@@ -103,7 +103,7 @@ Amazon側のページ構造変更や、商品ページの一部レイアウト�
 ### アンインストール
 
 1. `chrome://extensions` で「Amazon レビュー注意度メーター」の「削除」を押します。
-2. 展開した `amazon-review-trust-meter-v2.2.0` フォルダが不要なら、通常のファイルと同じように削除します。
+2. 展開した `amazon-review-trust-meter-v2.2.1` フォルダが不要なら、通常のファイルと同じように削除します。
 
 ## 判定の仕組み
 
@@ -148,7 +148,16 @@ AIや外部AI APIによる判定ではありません。ブラウザ内のルー
 
 ## 現在のバージョン
 
-最新版は[v2.2.0](https://github.com/AiWithYou/amazon-review-trust-meter/releases/tag/v2.2.0)です。
+最新版は[v2.2.1](https://github.com/AiWithYou/amazon-review-trust-meter/releases/tag/v2.2.1)です。
+
+- `10時間` と `10.0時間`、先頭ゼロ、桁区切りの表記差を仕様矛盾として加点しない
+- 商品の詳細表を分析に追加し、表・箇条書き・段落の境界で数値を連結しない
+- 入れ子の説明領域を重複取得せず、説明内のスクリプト・スタイルを分析から除外
+- 評価欄などの挿入先が後から変わっても、開閉状態を保ってカードを再配置
+- 公開レビュープロフィールURLの更新を再判定に反映
+- 回帰テスト80件、Chromeの表示・操作、提出ZIPの内容とSHA-256を確認
+
+以下はv2.2.0で導入済みの改善です。
 
 - 欠損した星・割合を0と誤認せず、レビューIDの重複を除外
 - Amazonの重み付き平均との差を注意度へ加点しない
@@ -190,6 +199,8 @@ npm run benchmark
 - `npm run package`：Manifestのバージョンを使って配布ZIPと `SHA256SUMS.txt` を生成
 - `npm run package:verify`：ZIPのファイル一覧・内容・Manifestバージョン・チェックサムを検証
 
+`npm run preview` の起動中は、[基本の動作確認](http://127.0.0.1:8766/dp/B012345678)、[ストア画像の一致例](http://127.0.0.1:8766/store/dp/B012345678)、[仕様矛盾の例](http://127.0.0.1:8766/store/dp/B012345678?conflicts)を開けます。いずれもサンプルデータです。
+
 ### ファイル構成
 
 ```text
@@ -223,6 +234,8 @@ dist/                               配布ZIPとSHA-256チェックサム
 
 ## Chromeウェブストアへ更新を提出する場合
 
-[ストア提出用ZIP](https://github.com/AiWithYou/amazon-review-trust-meter/releases/download/v2.2.0/amazon-review-trust-meter-v2.2.0-chrome-web-store.zip)は、manifest.jsonがZIP直下に入っています。既存アイテムの「パッケージ」から「新しいパッケージをアップロード」を選び、このZIPを提出してください。通常はCRX不要です。「Verified CRX Uploads」が有効なアイテムだけは、登録済み秘密鍵によるCRX署名が必要です。[Chrome公式更新手順](https://developer.chrome.com/docs/webstore/update)
+[掲載情報](./docs/CHROME-WEB-STORE-LISTING.md)と[提出準備ガイド](./docs/CHROME-WEB-STORE-SUBMISSION.md)に、説明文、プライバシー申告、画像、審査担当者向け手順を用意しています。
+
+[ストア提出用ZIP](https://github.com/AiWithYou/amazon-review-trust-meter/releases/download/v2.2.1/amazon-review-trust-meter-v2.2.1-chrome-web-store.zip)は、manifest.jsonがZIP直下に入っています。既存アイテムの「パッケージ」から「新しいパッケージをアップロード」を選び、このZIPを提出してください。通常はCRX不要です。「Verified CRX Uploads」が有効なアイテムだけは、登録済み秘密鍵によるCRX署名が必要です。[Chrome公式更新手順](https://developer.chrome.com/docs/webstore/update)
 
 GitHub Release公開とChromeウェブストア審査・公開は別です。ストアへの提出・公開状態はダッシュボードで確認してください。

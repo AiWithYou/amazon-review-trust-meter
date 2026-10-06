@@ -179,10 +179,10 @@
 
   function collectClaimConflicts(title, details) {
     const definitions = [
-      { label: '連続時間', weight: 18, pattern: /(\d+(?:\.\d+)?)\s*時間\s*(?:の)?(?:連続(?:再生|使用|運転)?|再生|持続使用)/gi },
-      { label: '防水・防塵等級', weight: 28, pattern: /\b(IP(?:X\d|\d{2}))\b/gi },
-      { label: '電池容量', weight: 18, pattern: /\b(\d{1,3}(?:,\d{3})+|\d{3,6})\s*mAh/gi },
-      { label: '発光パターン数', weight: 12, pattern: /(\d+)\s*種類(?:の)?(?:発光|ライト|点灯)(?:パターン|モード|色)?/gi }
+      { label: '連続時間', weight: 18, numeric: true, pattern: /(\d+(?:\.\d+)?)\s*時間\s*(?:の)?(?:連続(?:再生|使用|運転)?|再生|持続使用)/gi },
+      { label: '防水・防塵等級', weight: 28, numeric: false, pattern: /\b(IP(?:X\d|\d{2}))\b/gi },
+      { label: '電池容量', weight: 18, numeric: true, pattern: /\b(\d{1,3}(?:,\d{3})+|\d{3,6})\s*mAh/gi },
+      { label: '発光パターン数', weight: 12, numeric: true, pattern: /(\d+)\s*種類(?:の)?(?:発光|ライト|点灯)(?:パターン|モード|色)?/gi }
     ];
     const conflicts = [];
 
@@ -190,7 +190,18 @@
       const inTitle = collectMatches(title, definition.pattern);
       const inDetails = collectMatches(details, definition.pattern);
       if (!inTitle.length || !inDetails.length) continue;
-      if (inTitle.some((value) => inDetails.includes(value))) continue;
+      // Normalize only comparison values so conflict evidence keeps its original formatting.
+      const comparisonValue = (value) => {
+        if (!definition.numeric) return value;
+        // The patterns capture unsigned decimal strings. Strip only redundant zeros:
+        // Number conversion would merge distinct large integers or precise decimals.
+        const [integer, fraction = ''] = value.split('.');
+        const whole = integer.replace(/^0+(?=\d)/, '');
+        const decimal = fraction.replace(/0+$/, '');
+        return decimal ? `${whole}.${decimal}` : whole;
+      };
+      const detailValues = new Set(inDetails.map(comparisonValue));
+      if (inTitle.some((value) => detailValues.has(comparisonValue(value)))) continue;
       conflicts.push({ label: definition.label, weight: definition.weight, title: inTitle, details: inDetails });
     }
     return conflicts;

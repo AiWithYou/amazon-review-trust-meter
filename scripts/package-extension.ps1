@@ -34,6 +34,7 @@ $runtimeFiles = @(
   'PRIVACY.md',
   'docs/ALGORITHM.md',
   'docs/AUDIT-2026-09-21.md',
+  'docs/AUDIT-2026-10-06.md',
   'LICENSE'
 )
 

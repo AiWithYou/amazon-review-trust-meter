@@ -2,10 +2,17 @@
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
+const storePreview = require('./store-preview.cjs');
 const root = path.join(__dirname, '..');
 const assets = new Set(['scoring-base.js','scoring-features.js','scoring.js','content.js','styles.css']);
 http.createServer((req,res) => {
   const pathname = new URL(req.url, 'http://127.0.0.1').pathname;
+  if (pathname === '/favicon.ico') { res.writeHead(204); res.end(); return; }
+  if (pathname === '/store/dp/B012345678') {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.end(storePreview(new URL(req.url, 'http://127.0.0.1').searchParams.has('conflicts')));
+    return;
+  }
   const file = pathname === '/dp/B012345678' ? 'tests/fixtures/product.html' : assets.has(pathname.slice(1)) ? pathname.slice(1) : null;
   if (!file) { res.writeHead(404); res.end(); return; }
   res.setHeader('Content-Type', file.endsWith('.html') ? 'text/html; charset=utf-8' : file.endsWith('.css') ? 'text/css' : 'text/javascript');

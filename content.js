@@ -196,13 +196,26 @@
   }
 
   function getListingDetails(doc = document) {
-    return [
-      doc.querySelector('#feature-bullets')?.textContent,
-      doc.querySelector('#productOverview_feature_div')?.textContent,
-      doc.querySelector('#productDescription')?.textContent,
-      doc.querySelector('#aplus')?.textContent,
-      doc.querySelector('#productDetails_techSpec_section_1')?.textContent
-    ].filter(Boolean).map(normalizeSpaces).join(' ');
+    const elements = [
+      '#feature-bullets',
+      '#productOverview_feature_div',
+      '#productDescription',
+      '#aplus',
+      '#productDetails_techSpec_section_1',
+      '#productDetails_detailBullets_sections1'
+    ].map((selector) => doc.querySelector(selector)).filter(Boolean);
+    // A selected table can already be inside another selected description.
+    const roots = elements.filter((element) => !elements.some((other) => other !== element && other.contains(element)));
+    const readText = (node) => {
+      if (node.nodeType === 3) return node.nodeValue;
+      if (node.nodeType !== 1) return '';
+      if (/^(SCRIPT|STYLE|TEMPLATE|NOSCRIPT)$/.test(node.tagName)) return '';
+      const text = [...node.childNodes].map(readText).join('');
+      // Keep structural boundaries distinct from whitespace allowed inside a claim.
+      return /^(TH|TD|TR|LI|P|DIV|SECTION|BR|HR|H[1-6])$/.test(node.tagName) ? `\u0000${text}\u0000` : text;
+    };
+    return roots.map((element) => readText(element)
+      .split('\u0000').map(normalizeSpaces).filter(Boolean).join(' | ')).filter(Boolean).join(' | ');
   }
 
   function getReviewTitle(reviewElement) {
@@ -423,7 +436,13 @@
 
     const pageData = collectPageData();
     const fingerprint = createFingerprint(asin, pageData);
-    if (fingerprint === lastFingerprint && currentCard) return;
+    if (fingerprint === lastFingerprint && currentCard) {
+      const neighbour = insertionPoint.position === 'afterend'
+        ? insertionPoint.element.nextElementSibling
+        : insertionPoint.element.firstElementChild;
+      if (neighbour !== currentCard) insertionPoint.element.insertAdjacentElement(insertionPoint.position, currentCard);
+      return;
+    }
 
     const analysis = scoring.analyzeProduct(pageData);
     const nextCard = createCard({
@@ -466,7 +485,7 @@
     observer = new MutationObserver((mutations) => {
       if (mutations.some(isRelevantMutation)) scheduleRender();
     });
-    observer.observe(document.documentElement, { childList: true, characterData: true, attributes: true, attributeFilter: ['title', 'aria-label', 'aria-valuenow', 'data-review-id'], subtree: true });
+    observer.observe(document.documentElement, { childList: true, characterData: true, attributes: true, attributeFilter: ['title', 'aria-label', 'aria-valuenow', 'data-review-id', 'href'], subtree: true });
     window.addEventListener('popstate', scheduleRender);
     window.addEventListener('pageshow', scheduleRender);
   }

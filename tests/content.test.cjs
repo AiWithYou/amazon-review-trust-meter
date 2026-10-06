@@ -162,3 +162,36 @@ test('ブラウザ戻る操作のASIN変更を反映し商品外では表示を�
   assert.equal(doc.querySelector('#review-trust-meter-card'),null);
   await flush();
 });
+
+test('後から追加・削除された挿入先へ同じカードを移し詳細の開閉を保つ', async (t) => {
+  const {doc,tick,flush,timers} = runningFixture(t);
+  await tick();
+  const card = doc.querySelector('#review-trust-meter-card');
+  card.querySelector('details').open = true;
+  const anchor = doc.createElement('div');
+  anchor.id = 'ask_feature_div';
+  doc.querySelector('#centerCol').append(anchor);
+  await flush(); assert.equal(timers.size, 1); await tick();
+  assert.equal(anchor.nextElementSibling, card);
+  assert.equal(card.querySelector('details').open, true);
+  anchor.remove(); await flush(); await tick();
+  assert.equal(doc.querySelector('#averageCustomerReviews_feature_div').nextElementSibling, card);
+  assert.equal(doc.querySelectorAll('#review-trust-meter-card').length, 1);
+  assert.equal(timers.size, 0);
+});
+
+test('プロフィールURLの属性更新で投稿者重複を再判定する', async (t) => {
+  const {doc,tick,flush,timers} = runningFixture(t);
+  await tick();
+  const second = doc.querySelector('[data-hook="review"]').cloneNode(true);
+  second.setAttribute('data-review-id', 'R2');
+  const profile = second.querySelector('.a-profile');
+  profile.setAttribute('href', '/gp/profile/A2');
+  doc.querySelector('#centerCol').append(second);
+  await flush(); await tick();
+  assert.doesNotMatch(doc.querySelector('#review-trust-meter-card').textContent, /同じ投稿者による同方向/);
+  profile.setAttribute('href', '/gp/profile/A1');
+  await flush(); assert.equal(timers.size, 1); await tick();
+  assert.match(doc.querySelector('#review-trust-meter-card').textContent, /同じ投稿者による同方向/);
+  assert.equal(timers.size, 0);
+});
